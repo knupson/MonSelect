@@ -21,6 +21,7 @@ public sealed class WindowWatcher : IDisposable
     private Thread? _thread;
     private uint _threadId;
     private nint _hook;
+    private int _disposed;
 
     // El delegate se guarda en un campo para que el GC no lo mueva ni lo
     // recolecte: si eso pasa, el hook muere con una violación de acceso que no
@@ -43,6 +44,14 @@ public sealed class WindowWatcher : IDisposable
     }
 
     /// <summary>Encola trabajo para que corra en el hilo dueño de las ventanas.</summary>
+    /// <remarks>
+    /// El orden importa: encolar primero y recién después revisar <see cref="_threadId"/>
+    /// garantiza que, para cuando este método decide si puede despertar al pump, el
+    /// trabajo ya está en la cola — nunca al revés. Si <see cref="_threadId"/> todavía
+    /// es 0 (Post corrió antes de que el pump lo publicara), el mensaje de despertar se
+    /// omite acá, pero el pump hace un catch-up apenas arranca (ver <see cref="Pump"/>)
+    /// así el ítem no queda encallado.
+    /// </remarks>
     public void Post(Action work)
     {
         _queue.Enqueue(work);
@@ -67,6 +76,14 @@ public sealed class WindowWatcher : IDisposable
             NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
 
         _ready.Set();
+
+        // Post() puede haber corrido mientras _threadId todavía era 0 (antes de la
+        // línea de arriba en esta misma función) y, en ese caso, no envió el mensaje
+        // de despertar. Cualquier trabajo encolado en esa ventana ya está en _queue
+        // para cuando llegamos acá, así que un catch-up ahora evita que se quede
+        // encallado hasta que llegue otro Post() posterior por casualidad.
+        if (!_queue.IsEmpty)
+            NativeMethods.PostThreadMessageW(_threadId, WM_RUN_WORK, 0, 0);
 
         while (NativeMethods.GetMessageW(out var msg, 0, 0, 0) > 0)
         {
@@ -119,13 +136,33 @@ public sealed class WindowWatcher : IDisposable
 
     public void Dispose()
     {
+        // Seguro llamar dos veces: la segunda vez no vuelve a postear el quit, ni
+        // a hacer Join, ni a liberar el GCHandle.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         if (_threadId != 0)
             NativeMethods.PostThreadMessageW(_threadId, WM_QUIT_PUMP, 0, 0);
 
-        _thread?.Join(TimeSpan.FromSeconds(2));
+        // UnhookWinEvent sólo corre en Pump(), después de que el loop de mensajes
+        // termina. Hasta que eso pase, el hook sigue instalado y Windows puede seguir
+        // sosteniendo un puntero al delegate. Si el hilo no confirma su salida, NO
+        // liberamos el GCHandle: liberarlo igual dejaría el delegate recolectable
+        // mientras el hook sigue activo, exactamente la violación de acceso sin rastro
+        // que el GCHandle existe para evitar. Perder el handle hasta que el proceso
+        // termine cuesta unos bytes; liberarlo antes de tiempo cuesta un crash.
+        var exited = _thread is null || _thread.Join(TimeSpan.FromSeconds(2));
 
-        if (_callbackHandle.IsAllocated)
-            _callbackHandle.Free();
+        if (exited)
+        {
+            if (_callbackHandle.IsAllocated)
+                _callbackHandle.Free();
+        }
+        else
+        {
+            Console.Error.WriteLine(
+                "[watcher] el hilo pump no terminó a tiempo; se retiene el GCHandle del callback a propósito.");
+        }
 
         _ready.Dispose();
     }
