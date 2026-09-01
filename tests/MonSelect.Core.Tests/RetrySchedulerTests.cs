@@ -114,7 +114,7 @@ public class RetrySchedulerTests
     }
 
     [Fact]
-    public async Task Stops_when_the_window_disappears_mid_retry()
+    public async Task Stops_immediately_when_the_window_never_existed()
     {
         var system = new FakeWindowSystem();
         var window = system.Add(Hwnd, Elsewhere, 0);
@@ -128,6 +128,68 @@ public class RetrySchedulerTests
 
         Assert.False(result.Settled);
         Assert.Equal(0, result.Attempts);
+    }
+
+    /// <summary>Saca la ventana del fake justo antes de la N-ésima espera, simulando que se cerró entre reintentos.</summary>
+    private sealed class RemovingDelay(FakeWindowSystem system, nint handle, int removeBeforeCallNumber) : IDelay
+    {
+        private int _calls;
+
+        public Task WaitAsync(int milliseconds, CancellationToken ct)
+        {
+            _calls++;
+            if (_calls == removeBeforeCallNumber)
+                system.Remove(handle);
+
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task Stops_when_the_window_disappears_after_an_attempt_has_run()
+    {
+        var system = new FakeWindowSystem();
+        var window = system.Add(Hwnd, Elsewhere, 0);
+        window.FightsBackTo = Elsewhere;
+        window.FightsForAttempts = 99; // nunca cede, así el loop llega a una segunda vuelta
+
+        // La ventana desaparece durante la espera de la segunda vuelta, es
+        // decir después de que la primera vuelta ya corrió attempt() con éxito.
+        var delay = new RemovingDelay(system, Hwnd, removeBeforeCallNumber: 2);
+        var scheduler = new RetryScheduler(system, delay);
+
+        var result = await scheduler.RunAsync(
+            Hwnd, Schedule, Wanted,
+            attempt: () => system.SetObservedBounds(Hwnd, Wanted),
+            CancellationToken.None);
+
+        // Una sola vuelta llegó a ejecutar attempt() antes de que la ventana
+        // desapareciera en la espera de la segunda.
+        Assert.False(result.Settled);
+        Assert.Equal(1, result.Attempts);
+    }
+
+    /// <summary>Reloj de mentira que se cancela mientras espera, como Task.Delay(ms, ct) de verdad.</summary>
+    private sealed class ThrowingDelay : IDelay
+    {
+        public Task WaitAsync(int milliseconds, CancellationToken ct)
+            => throw new TaskCanceledException();
+    }
+
+    [Fact]
+    public async Task Cancellation_during_the_wait_produces_an_outcome_not_an_exception()
+    {
+        var system = new FakeWindowSystem();
+        system.Add(Hwnd, Elsewhere, 0);
+
+        var scheduler = new RetryScheduler(system, new ThrowingDelay());
+
+        var result = await scheduler.RunAsync(
+            Hwnd, Schedule, Wanted, attempt: () => { }, CancellationToken.None);
+
+        Assert.False(result.Settled);
+        Assert.Equal(0, result.Attempts);
+        Assert.Empty(result.Observed);
     }
 
     [Fact]
