@@ -14,6 +14,7 @@ public sealed class Bootstrap : IDisposable
     private readonly WindowWatcher _watcher = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly ApplyLogFile _file = new();
+    private readonly WindowPlacer _placer;
 
     private FileSystemWatcher? _configWatcher;
     private CancellationTokenSource? _reloadDebounce;
@@ -28,11 +29,12 @@ public sealed class Bootstrap : IDisposable
     {
         var styles = new StyleStore(ConfigPaths.Borderless);
         styles.Load();
+        _placer = new WindowPlacer(_windowSystem, styles);
 
         Engine = new RuleEngine(
             new WindowProbe(_windowSystem),
             new MonitorRegistry(_monitorSystem),
-            new WindowPlacer(_windowSystem, styles),
+            _placer,
             new RetryScheduler(_windowSystem, new RealDelay()),
             Log);
     }
@@ -51,6 +53,14 @@ public sealed class Bootstrap : IDisposable
 
     /// <summary>Encola trabajo en el hilo dueño de las ventanas.</summary>
     public void Post(Action work) => _watcher.Post(work);
+
+    /// <summary>
+    /// Revierte todas las ventanas borderless registradas. Sin invocar esto desde
+    /// algún lado, StyleStore/WindowPlacer.Revert nunca corre en la app real y un
+    /// borderless no tiene vuelta atrás (F1 acceptance, defecto 3). Llamar sólo
+    /// desde dentro de <see cref="Post"/>: muta ventanas ajenas.
+    /// </summary>
+    public int RevertAllBorderless() => _placer.RevertAll();
 
     private async Task HandleAndLogAsync(nint hwnd)
     {

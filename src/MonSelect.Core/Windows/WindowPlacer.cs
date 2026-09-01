@@ -36,6 +36,43 @@ public sealed class WindowPlacer(IWindowSystem system, StyleStore styles)
         return true;
     }
 
+    /// <summary>
+    /// Revierte todas las ventanas borderless que <see cref="StyleStore"/> tiene
+    /// registradas. Pensado para el ítem de menú de bandeja: sin esto, un
+    /// borderless nunca tiene vuelta atrás desde la app (spec §9). Debe correr
+    /// en el hilo dueño de la mutación de ventanas — ver <c>WindowWatcher.Post</c>.
+    /// </summary>
+    /// <returns>Cuántas ventanas se restauraron de verdad.</returns>
+    public int RevertAll()
+    {
+        var restored = 0;
+        var changed = false;
+
+        // Instantánea: Revert() y el descarte de abajo mutan styles por dentro
+        // (styles.Forget), y styles.All() expone la colección viva.
+        foreach (var record in styles.All().ToList())
+        {
+            var handle = (nint)record.Handle;
+
+            if (Revert(handle))
+            {
+                restored++;
+                changed = true;
+                continue;
+            }
+
+            // La ventana ya no existe: el registro es basura acumulada, se
+            // descarta en silencio en vez de quedar para siempre en el store.
+            if (!system.IsWindow(handle) && styles.Forget(record.Handle) is not null)
+                changed = true;
+        }
+
+        if (changed)
+            styles.Save();
+
+        return restored;
+    }
+
     private void StripFrame(nint handle, uint processId, long processStartTicks)
     {
         var current = system.GetStyle(handle);

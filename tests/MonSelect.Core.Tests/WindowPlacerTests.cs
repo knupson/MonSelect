@@ -130,4 +130,59 @@ public class WindowPlacerTests : IDisposable
         Assert.False(_placer.Revert(Hwnd)); // Returns false because window is gone
         Assert.True(_styles.TryGet(Hwnd, out _)); // Record still exists, not consumed
     }
+
+    // --- Defecto 3: nada en la app llamaba WindowPlacer.Revert. RevertAll es
+    // lo que el menú de bandeja invoca para revertir todo lo registrado.
+
+    private const nint OtherHwnd = 5678;
+
+    [Fact]
+    public void RevertAll_restores_every_live_borderless_window_and_reports_how_many()
+    {
+        _system.Add(OtherHwnd, Rect.FromLtrb(200, 200, 1000, 800), Overlapped);
+        _placer.Apply(Hwnd, 1, 1, Target(ShowCommand.Maximized, strip: true));
+        _placer.Apply(OtherHwnd, 2, 2, Target(ShowCommand.Maximized, strip: true));
+
+        Assert.Equal(2, _placer.RevertAll());
+
+        Assert.False(_styles.TryGet(Hwnd, out _));
+        Assert.False(_styles.TryGet(OtherHwnd, out _));
+        Assert.Equal(Overlapped, _system[Hwnd].Style);
+        Assert.Equal(Overlapped, _system[OtherHwnd].Style);
+    }
+
+    [Fact]
+    public void RevertAll_discards_records_for_windows_that_no_longer_exist()
+    {
+        _system.Add(OtherHwnd, Rect.FromLtrb(200, 200, 1000, 800), Overlapped);
+        _placer.Apply(Hwnd, 1, 1, Target(ShowCommand.Maximized, strip: true));
+        _placer.Apply(OtherHwnd, 2, 2, Target(ShowCommand.Maximized, strip: true));
+
+        _system.Remove(Hwnd); // esta ventana ya no existe
+
+        Assert.Equal(1, _placer.RevertAll()); // sólo OtherHwnd contó como restaurada
+
+        Assert.False(_styles.TryGet(Hwnd, out _), "el registro basura tiene que descartarse igual");
+        Assert.False(_styles.TryGet(OtherHwnd, out _));
+    }
+
+    [Fact]
+    public void RevertAll_persists_the_cleared_store_to_disk()
+    {
+        _placer.Apply(Hwnd, 1, 1, Target(ShowCommand.Maximized, strip: true));
+        _placer.RevertAll();
+
+        // Una StyleStore nueva sobre el mismo archivo prueba que se persistió,
+        // no sólo que se limpió el diccionario en memoria de este test.
+        var reloaded = new StyleStore(Path.Combine(_dir.FullName, "borderless.json"));
+        reloaded.Load();
+
+        Assert.False(reloaded.TryGet(Hwnd, out _));
+    }
+
+    [Fact]
+    public void RevertAll_on_an_empty_store_does_nothing_and_reports_zero()
+    {
+        Assert.Equal(0, _placer.RevertAll());
+    }
 }
