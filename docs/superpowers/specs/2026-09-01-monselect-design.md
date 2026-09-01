@@ -147,8 +147,8 @@ monitors:                       # autogenerado en el primer arranque; los alias 
     path: '\\?\DISPLAY#BNQ7820#7&1a2b3c4d&0&UID268#{e6f07b5f-...}'
     label: "BenQ G2220HDA (derecha)"
   vertical:
-    path: '\\?\DISPLAY#GSM57EE#7&1a2b3c4d&0&UID264#{e6f07b5f-...}'
-    label: "LG M2380A (vertical)"
+    path: '\\?\DISPLAY#OOO2223#7&1a2b3c4d&0&UID260#{e6f07b5f-...}'
+    label: "MA2223J (vertical)"
 
 defaults:
   if_missing: skip              # skip | primary | nearest
