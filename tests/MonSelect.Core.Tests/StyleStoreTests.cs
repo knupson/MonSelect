@@ -85,4 +85,40 @@ public class StyleStoreTests : IDisposable
 
         Assert.Empty(store.All());
     }
+
+    [Fact]
+    public void Saving_when_directory_cannot_be_created_does_not_throw()
+    {
+        // Create a file where we want a directory, forcing directory creation to fail.
+        var blockingFile = System.IO.Path.Combine(_dir.FullName, "blocker.txt");
+        File.WriteAllText(blockingFile, "x");
+
+        var blockedPath = System.IO.Path.Combine(blockingFile, "subdir", "store.json");
+        var store = new StyleStore(blockedPath);
+        store.Remember(new BorderlessRecord(1234, 23340, 638000000000, 0x00CF0000));
+
+        // Should not throw despite the directory creation failure.
+        store.Save();
+
+        // Records should still be queryable in memory.
+        Assert.True(store.TryGet(1234, out var found));
+        Assert.Equal(0x00CF0000u, found.OriginalStyle);
+    }
+
+    [Fact]
+    public void No_temporary_file_is_left_behind_after_successful_save()
+    {
+        var store = new StyleStore(Path);
+        store.Remember(new BorderlessRecord(1234, 23340, 638000000000, 0x00CF0000));
+        store.Save();
+
+        // Verify the main file exists and the temp file does not.
+        Assert.True(File.Exists(Path), "Main file should exist");
+        Assert.False(File.Exists(Path + ".tmp"), "Temp file should not exist");
+
+        // Verify directory contains exactly one file (the json, no .tmp).
+        var files = Directory.GetFiles(_dir.FullName);
+        Assert.Single(files);
+        Assert.Equal(System.IO.Path.GetFileName(Path), System.IO.Path.GetFileName(files[0]));
+    }
 }

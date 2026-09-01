@@ -39,13 +39,39 @@ public sealed class StyleStore(string path)
 
     public IReadOnlyCollection<BorderlessRecord> All() => _records.Values;
 
+    /// <summary>
+    /// Persists records atomically: writes to a temp file, then replaces the target.
+    /// Swallows I/O errors to keep the tray app responsive; in-memory records stay intact.
+    /// </summary>
     public void Save()
     {
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory);
 
-        File.WriteAllText(path, JsonSerializer.Serialize(_records.Values));
+            var tempPath = path + ".tmp";
+            try
+            {
+                File.WriteAllText(tempPath, JsonSerializer.Serialize(_records.Values));
+                File.Move(tempPath, path, overwrite: true);
+            }
+            catch
+            {
+                try { File.Delete(tempPath); }
+                catch { }
+                throw;
+            }
+        }
+        catch (IOException ex)
+        {
+            Console.Error.WriteLine($"Failed to save styles to {path}: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.Error.WriteLine($"Failed to save styles to {path}: {ex.Message}");
+        }
     }
 
     /// <summary>
