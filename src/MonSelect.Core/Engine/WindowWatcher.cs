@@ -53,6 +53,15 @@ public sealed class WindowWatcher : IDisposable
     private nint _hook;
     private int _disposed;
 
+    // Windows deja de invocar un hook out-of-context que alguna vez tardó
+    // demasiado, y no lo desinstala ni avisa: el proceso sigue vivo, el pump
+    // sigue bombeando, y no llega ni un evento más. Diagnosticado con un volcado
+    // del proceso colgado: ningún hilo bloqueado, hook mudo. La única defensa
+    // es re-armarlo cuando lleva demasiado tiempo callado.
+    private const uint WatchdogIntervalMs = 15_000;
+    private const long HookSilenceThresholdMs = 30_000;
+    private long _lastEventTicks;
+
     // El delegate se guarda en un campo para que el GC no lo mueva ni lo
     // recolecte: si eso pasa, el hook muere con una violación de acceso que no
     // deja rastro útil.
@@ -78,6 +87,7 @@ public sealed class WindowWatcher : IDisposable
         _hookThread.SetApartmentState(ApartmentState.STA);
         _hookThread.Start();
         _hookReady.Wait();
+
     }
 
     /// <summary>
@@ -100,14 +110,9 @@ public sealed class WindowWatcher : IDisposable
         _callback = OnWinEvent;
         _callbackHandle = GCHandle.Alloc(_callback);
 
-        _hook = NativeMethods.SetWinEventHook(
-            NativeMethods.EVENT_SYSTEM_FOREGROUND,
-            NativeMethods.EVENT_OBJECT_SHOW,
-            0,
-            _callback,
-            0,
-            0,
-            NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
+        _hook = InstallHook();
+        Interlocked.Exchange(ref _lastEventTicks, Environment.TickCount64);
+        var watchdogTimer = NativeMethods.SetTimer(0, 0, WatchdogIntervalMs, 0);
 
         _hookReady.Set();
 
@@ -116,12 +121,51 @@ public sealed class WindowWatcher : IDisposable
             if (msg.message == WM_QUIT_PUMP)
                 break;
 
+            if (msg.message == NativeMethods.WM_TIMER)
+            {
+                RearmHookIfSilent();
+                continue;
+            }
+
             NativeMethods.TranslateMessage(ref msg);
             NativeMethods.DispatchMessageW(ref msg);
         }
 
+        if (watchdogTimer != 0)
+            NativeMethods.KillTimer(0, watchdogTimer);
+
         if (_hook != 0)
             NativeMethods.UnhookWinEvent(_hook);
+    }
+
+    private nint InstallHook() => NativeMethods.SetWinEventHook(
+        NativeMethods.EVENT_SYSTEM_FOREGROUND,
+        NativeMethods.EVENT_OBJECT_SHOW,
+        0,
+        _callback!,
+        0,
+        0,
+        NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
+
+    /// <summary>
+    /// Corre en el hilo del hook, que es el único que puede desinstalarlo.
+    /// Re-armar es barato; el costo de no hacerlo es que MonSelect deja de
+    /// funcionar en silencio hasta que alguien lo reinicia a mano.
+    /// </summary>
+    private void RearmHookIfSilent()
+    {
+        var silentMs = Environment.TickCount64 - Interlocked.Read(ref _lastEventTicks);
+
+        if (silentMs < HookSilenceThresholdMs)
+            return;
+
+        if (_hook != 0)
+            NativeMethods.UnhookWinEvent(_hook);
+
+        _hook = InstallHook();
+        Interlocked.Exchange(ref _lastEventTicks, Environment.TickCount64);
+
+        Console.Error.WriteLine($"[watcher] hook re-armado tras {silentMs} ms sin eventos.");
     }
 
     private void OnWinEvent(
@@ -137,6 +181,7 @@ public sealed class WindowWatcher : IDisposable
         // Este callback corre en el hilo del hook: encolar y volver ya mismo es
         // obligatorio. Nada de lo que cuelga de WindowAppeared puede ejecutarse
         // acá — ver el comentario de clase.
+        Interlocked.Exchange(ref _lastEventTicks, Environment.TickCount64);
         _placementQueue.Add(() => WindowAppeared?.Invoke(hwnd));
     }
 

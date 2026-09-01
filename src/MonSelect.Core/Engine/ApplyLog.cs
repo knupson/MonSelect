@@ -33,6 +33,13 @@ public sealed class ApplyLog(int capacity = 200)
     private readonly Queue<ApplyEntry> _entries = new();
     private readonly Lock _gate = new();
 
+    /// <summary>
+    /// Se dispara por cada entrada. Los consumidores que persisten a disco deben
+    /// engancharse acá: comparar Count antes y después no sirve, porque este es
+    /// un buffer circular y su Count deja de crecer al llegar a la capacidad.
+    /// </summary>
+    public event Action<ApplyEntry>? EntryAdded;
+
     public void Add(ApplyEntry entry)
     {
         lock (_gate)
@@ -41,6 +48,8 @@ public sealed class ApplyLog(int capacity = 200)
             while (_entries.Count > capacity)
                 _entries.Dequeue();
         }
+
+        EntryAdded?.Invoke(entry);
     }
 
     public IReadOnlyList<ApplyEntry> Recent()

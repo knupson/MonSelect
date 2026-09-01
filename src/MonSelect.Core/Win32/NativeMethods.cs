@@ -139,6 +139,14 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern bool PostThreadMessageW(uint thread, uint msg, nint wParam, nint lParam);
 
+    internal const uint WM_TIMER = 0x0113;
+
+    [DllImport("user32.dll")]
+    internal static extern nuint SetTimer(nint hWnd, nuint nIDEvent, uint uElapse, nint lpTimerFunc);
+
+    [DllImport("user32.dll")]
+    internal static extern bool KillTimer(nint hWnd, nuint uIDEvent);
+
     [DllImport("kernel32.dll")]
     internal static extern uint GetCurrentThreadId();
 }

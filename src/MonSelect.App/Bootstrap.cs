@@ -56,7 +56,14 @@ public sealed class Bootstrap : IDisposable
         WatchConfig();
         _file.Prune();
 
-        _watcher.WindowAppeared += hwnd => _ = HandleAndLogAsync(hwnd);
+        // Sincrónico a propósito. WindowAppeared ya corre en el hilo de
+        // placement, que es el dueño único de la mutación de ventanas. Con
+        // fire-and-forget, cada continuación async y cada escritura al log
+        // caían en el ThreadPool; como BoundedWindowSystem bloquea hilos con
+        // Thread.Join, el pool se agotaba y el pipeline quedaba varado con el
+        // proceso vivo y el hook entregando eventos normalmente.
+        Log.EntryAdded += _file.Write;
+        _watcher.WindowAppeared += hwnd => HandleAndLogAsync(hwnd).GetAwaiter().GetResult();
 
         _watcher.Start();
     }
@@ -72,14 +79,16 @@ public sealed class Bootstrap : IDisposable
     /// </summary>
     public int RevertAllBorderless() => _placer.RevertAll();
 
-    private async Task HandleAndLogAsync(nint hwnd)
-    {
-        var before = Log.Recent().Count;
-        await Engine.HandleAsync(hwnd, _cts.Token).ConfigureAwait(false);
-
-        foreach (var entry in Log.Recent().Skip(before))
-            _file.Write(entry);
-    }
+    /// <summary>
+    /// El archivo se alimenta desde <see cref="ApplyLog.EntryAdded"/>, no
+    /// comparando conteos antes y después. <see cref="ApplyLog"/> es un buffer
+    /// circular de capacidad fija: una vez lleno, su Count queda clavado y un
+    /// diff por conteo no vuelve a ver nada nunca más — el archivo se cortaba en
+    /// seco y parecía que el motor se había colgado, cuando seguía colocando
+    /// ventanas con normalidad.
+    /// </summary>
+    private Task HandleAndLogAsync(nint hwnd)
+        => Engine.HandleAsync(hwnd, _cts.Token);
 
     private void EnsureConfigExists()
     {
