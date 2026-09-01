@@ -42,8 +42,13 @@ internal static class NativeMethods
 
     internal delegate bool MonitorEnumProc(nint hMonitor, nint hdc, ref Rect rect, nint data);
 
+    internal delegate bool EnumWindowsProc(nint hwnd, nint lParam);
+
     [DllImport("user32.dll")]
     internal static extern bool EnumDisplayMonitors(nint hdc, nint clip, MonitorEnumProc proc, nint data);
+
+    [DllImport("user32.dll")]
+    internal static extern bool EnumWindows(EnumWindowsProc proc, nint lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool GetMonitorInfoW(nint hMonitor, ref MonitorInfoEx info);

@@ -7,4 +7,9 @@
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Probe" />
+    <InternalsVisibleTo Include="MonSelect.Core.Tests" />
+  </ItemGroup>
+
 </Project>
