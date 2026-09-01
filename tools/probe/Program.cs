@@ -1,10 +1,45 @@
 using System.Diagnostics;
 using MonSelect.Core.Monitors;
 using MonSelect.Core.Win32;
+using MonSelect.Core.Windows;
 
 if (args.Contains("--placement"))
 {
     RunPlacementExperiment(new Win32MonitorSystem());
+    return;
+}
+
+if (args.Contains("--windows"))
+{
+    var processNameHint = args.SkipWhile(a => a != "--windows").Skip(1).FirstOrDefault();
+    if (processNameHint is null)
+    {
+        Console.WriteLine("Uso: --windows <nombre de proceso>, p.ej. --windows rustdesk");
+        return;
+    }
+
+    var hwnd = FindVisibleWindowByProcessName(processNameHint);
+    if (hwnd == 0)
+    {
+        Console.WriteLine($"No se encontró una ventana visible cuyo proceso contenga '{processNameHint}'.");
+        return;
+    }
+
+    var probe = new WindowProbe(new Win32WindowSystem());
+    var info = probe.Describe(hwnd);
+    if (info is null)
+    {
+        Console.WriteLine("No se pudo describir la ventana.");
+        return;
+    }
+
+    Console.WriteLine($"pid      : {info.ProcessId}");
+    Console.WriteLine($"exe      : {info.ExePath ?? "<sin acceso>"}");
+    Console.WriteLine($"cmdline  : {info.CommandLine ?? "<sin acceso>"}");
+    Console.WriteLine($"class    : {info.ClassName}");
+    Console.WriteLine($"title    : {info.Title}");
+    Console.WriteLine($"bounds   : {info.Bounds}");
+    Console.WriteLine($"state    : {info.CurrentState}");
     return;
 }
 
