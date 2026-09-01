@@ -129,7 +129,7 @@ RetryScheduler  -> reaplica hasta rect estable
 
 **Core no habla Win32 directamente.** Todo acceso pasa por `IWindowSystem` e `IMonitorSystem`. La implementación real hace P/Invoke; los tests usan fakes. Sin esta frontera no hay forma de testear el matcher ni el motor sin un escritorio real con ventanas abiertas.
 
-**Un único hilo dueño de las ventanas.** El callback del hook requiere un thread con message pump propio, y ese mismo thread ejecuta el placement. `SetWindowPos` desde varios hilos contra la misma ventana produce resultados dependientes del orden, y el retry competiría consigo mismo. La GUI vive en el thread de WPF y se comunica por cola.
+**Un único hilo ejecuta el placement — pero NO es el del hook.** *(Corregido tras el hang de F1, ver `docs/superpowers/findings/f1-acceptance.md` y el commit que separó `WindowWatcher` en dos hilos. La redacción original de este párrafo decía "y ese mismo thread ejecuta el placement"; eso estaba mal — es exactamente lo que producía el cuelgue.)* `SetWindowPos`/`SetWindowPlacement` contra una ventana de otro proceso son llamadas síncronas sin timeout: si el proceso dueño está momentáneamente ocupado, la llamada no vuelve hasta que su cola de mensajes se despeja. El hilo del hook necesita un message pump propio para que `SetWinEventHook(WINEVENT_OUTOFCONTEXT)` entregue callbacks — pero si ESE hilo también ejecuta el placement, una sola ventana lenta bloquea la entrega de CUALQUIER evento nuevo: el proceso queda "Responding: True" pero deja de procesar ventanas, sin excepción, hasta que esa llamada vuelve. `WindowWatcher` usa dos hilos: uno sólo bombea el hook, el otro consume una cola donde corre todo el placement (`WindowAppeared` y todo lo que llega por `Post`). Sigue habiendo un único hilo que muta ventanas — `SetWindowPos` desde varios hilos contra la misma ventana produce resultados dependientes del orden y el retry competiría consigo mismo — sólo que ya no es el del hook. La GUI vive en el thread de WPF y se comunica por cola.
 
 **El delegate del callback se ancla con `GCHandle`.** Si el GC lo mueve, el hook muere con una violación de acceso difícil de diagnosticar.
 
@@ -147,8 +147,8 @@ monitors:                       # autogenerado en el primer arranque; los alias 
     path: '\\?\DISPLAY#BNQ7820#7&1a2b3c4d&0&UID268#{e6f07b5f-...}'
     label: "BenQ G2220HDA (derecha)"
   vertical:
-    path: '\\?\DISPLAY#GSM57EE#7&1a2b3c4d&0&UID264#{e6f07b5f-...}'
-    label: "LG M2380A (vertical)"
+    path: '\\?\DISPLAY#OOO2223#7&1a2b3c4d&0&UID260#{e6f07b5f-...}'
+    label: "MA2223J (vertical)"
 
 defaults:
   if_missing: skip              # skip | primary | nearest

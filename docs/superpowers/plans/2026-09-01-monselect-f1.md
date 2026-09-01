@@ -3649,7 +3649,7 @@ public sealed class WindowProbe(IWindowSystem system)
 
 - [ ] **Step 4: Agregar el volcado de ventanas al probe**
 
-Añadir a `tools/probe/Program.cs`:
+Añadir a `tools/probe/Program.cs`, **antes** de la declaración de `GetForegroundWindow` que agregó la Task 7** (misma función local, no redeclararla):
 
 ```csharp
 if (args.Contains("--windows"))
