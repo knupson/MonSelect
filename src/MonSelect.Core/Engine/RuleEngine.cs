@@ -31,12 +31,22 @@ public sealed class RuleEngine(
     /// </summary>
     private readonly HashSet<nint> _inFlight = new();
 
+    /// <summary>
+    /// Ventanas ya colocadas. Una regla se aplica cuando la ventana aparece, no
+    /// cada vez que el usuario la toca: EVENT_SYSTEM_FOREGROUND se dispara con
+    /// cada cambio de foco, y sin esto MonSelect devuelve la ventana a su sitio
+    /// apenas la movés, con lo que no se puede reacomodar nada a mano.
+    /// </summary>
+    private readonly HashSet<nint> _placed = new();
+
     public void UpdateRules(RuleSet set)
     {
         lock (_gate)
         {
             _set = set;
             _rotation.Clear();
+            // Config nueva: las ventanas ya colocadas pueden querer otro destino.
+            _placed.Clear();
             // Un reload es una decisión nueva del usuario: una regla first no
             // puede seguir ignorando procesos vivos por lo que pasó antes de guardar.
             _firstSeen.Clear();
@@ -50,16 +60,26 @@ public sealed class RuleEngine(
             if (ct.IsCancellationRequested)
                 return;
 
-            await HandleAsync(handle, ct).ConfigureAwait(false);
+            await HandleAsync(handle, ct, force: true).ConfigureAwait(false);
         }
     }
 
-    public async Task<ApplyResult> HandleAsync(nint handle, CancellationToken ct)
+    /// <param name="force">
+    /// Reaplica aunque la ventana ya haya sido colocada. Lo usa "aplicar reglas
+    /// ahora"; el camino automático nunca fuerza.
+    /// </param>
+    public async Task<ApplyResult> HandleAsync(nint handle, CancellationToken ct, bool force = false)
     {
         lock (_gate)
         {
             if (!_inFlight.Add(handle))
                 return ApplyResult.Ignored;
+
+            if (!force && _placed.Contains(handle))
+            {
+                _inFlight.Remove(handle);
+                return ApplyResult.Ignored;
+            }
         }
 
         try
@@ -130,6 +150,11 @@ public sealed class RuleEngine(
             var detail = $"{monitor.GdiName} {rule.Place.State}";
             if (!outcome.Settled && outcome.Observed.Count > 0)
                 detail += $"; último rect observado {outcome.Observed[^1]}";
+
+            // Colocada. No se vuelve a tocar hasta que la config cambie o el
+            // usuario pida "aplicar reglas ahora".
+            lock (_gate)
+                _placed.Add(handle);
 
             return Record(
                 info, rule,
