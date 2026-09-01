@@ -115,9 +115,48 @@ public class YamlStoreTests
 
             Assert.Equal(original.Monitors.Count, reloaded.Monitors.Count);
             Assert.Equal(original.Rules.Count, reloaded.Rules.Count);
-            Assert.Equal(original.Rules[1].Place.MonitorAliases, reloaded.Rules[1].Place.MonitorAliases);
-            Assert.Equal(original.Rules[1].RetryMs, reloaded.Rules[1].RetryMs);
-            Assert.Equal(original.Rules[0].Match.Title, reloaded.Rules[0].Match.Title);
+
+            foreach (var (alias, monitor) in original.Monitors)
+                Assert.Equal(monitor, reloaded.Monitors[alias]);
+
+            for (var i = 0; i < original.Rules.Count; i++)
+                AssertRuleEqual(original.Rules[i], reloaded.Rules[i]);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Round_trips_values_that_need_yaml_escaping()
+    {
+        const string yaml = """
+            version: 1
+            monitors:
+              benq:
+                path: '\\?\DISPLAY#BNQ7820#1&aaaa&0&UID268#{guid}'
+                label: "Monitor con \\ backslash"
+            rules:
+              - name: "Regla con \"comillas\" adentro"
+                match:
+                  title: "^WK-\\d+\\s*$"
+                place:
+                  monitor: benq
+                  state: normal
+            """;
+
+        var original = YamlStore.Parse(yaml);
+        var dir = Directory.CreateTempSubdirectory("monselect-tests");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "rules.yaml");
+            YamlStore.Save(path, original);
+            var reloaded = YamlStore.Load(path);
+
+            Assert.Equal("Monitor con \\ backslash", reloaded.Monitors["benq"].Label);
+            Assert.Equal("Regla con \"comillas\" adentro", reloaded.Rules[0].Name);
+            Assert.Equal("^WK-\\d+\\s*$", reloaded.Rules[0].Match.Title);
         }
         finally
         {
@@ -156,5 +195,27 @@ public class YamlStoreTests
 
         Assert.Empty(set.Rules);
         Assert.Empty(set.Monitors);
+    }
+
+    /// <summary>
+    /// Compares every field of two <see cref="Rule"/> values. Not a plain
+    /// Assert.Equal(expected, actual): the record-generated Equals compares
+    /// RetryMs and Place.MonitorAliases via EqualityComparer&lt;IReadOnlyList&lt;T&gt;&gt;.Default,
+    /// which falls back to reference equality for arrays, so two lists with
+    /// identical elements from different Save/Load instances would compare
+    /// unequal. Comparing each collection field directly instead lets xunit's
+    /// own Assert.Equal apply its structural (element-by-element) comparison.
+    /// </summary>
+    private static void AssertRuleEqual(Rule expected, Rule actual)
+    {
+        Assert.Equal(expected.Name, actual.Name);
+        Assert.Equal(expected.Enabled, actual.Enabled);
+        Assert.Equal(expected.Apply, actual.Apply);
+        Assert.Equal(expected.IfMissing, actual.IfMissing);
+        Assert.Equal(expected.RetryMs, actual.RetryMs);
+        Assert.Equal(expected.Match, actual.Match);
+        Assert.Equal(expected.Place.State, actual.Place.State);
+        Assert.Equal(expected.Place.Rect, actual.Place.Rect);
+        Assert.Equal(expected.Place.MonitorAliases, actual.Place.MonitorAliases);
     }
 }

@@ -1,3 +1,4 @@
+using System.Text;
 using MonSelect.Core.Monitors;
 using MonSelect.Core.Win32;
 using MonSelect.Core.Windows;
@@ -116,7 +117,48 @@ public static class YamlStore
             writer.WriteLine($"      {key}: {Quote(value)}");
     }
 
-    private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
+    /// <summary>
+    /// Produce un escalar YAML entre comillas dobles correctamente escapado.
+    /// El orden importa: la barra invertida se escapa primero, para que las
+    /// barras invertidas que introducen los demás casos no se vuelvan a
+    /// escapar.
+    /// </summary>
+    private static string Quote(string value)
+    {
+        var result = new StringBuilder(value.Length + 2);
+        result.Append('"');
+
+        foreach (var c in value)
+        {
+            switch (c)
+            {
+                case '\\':
+                    result.Append("\\\\");
+                    break;
+                case '"':
+                    result.Append("\\\"");
+                    break;
+                case '\n':
+                    result.Append("\\n");
+                    break;
+                case '\r':
+                    result.Append("\\r");
+                    break;
+                case '\t':
+                    result.Append("\\t");
+                    break;
+                default:
+                    if (c < ' ')
+                        result.Append("\\x").Append(((int)c).ToString("x2"));
+                    else
+                        result.Append(c);
+                    break;
+            }
+        }
+
+        result.Append('"');
+        return result.ToString();
+    }
 
     private static IReadOnlyDictionary<string, MonitorAlias> ReadMonitors(YamlMappingNode root)
     {
