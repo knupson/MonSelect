@@ -43,6 +43,9 @@ public sealed class TrayHost : IDisposable
     /// Abre la GUI o, si ya está abierta, la trae al frente en vez de apilar
     /// ventanas — es la única ventana que MonSelect crea, y con una alcanza.
     /// </summary>
+    /// <summary>Abre la ventana de gestión. Lo usa el menú y el arranque con --gui.</summary>
+    public void OpenGuiWindow() => OpenGui();
+
     private void OpenGui()
     {
         if (_gui is null)

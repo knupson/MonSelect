@@ -26,6 +26,11 @@ public static class Program
         bootstrap.Start();
         using var tray = new TrayHost(bootstrap);
 
+        // --gui abre la ventana al arrancar, sin tener que encontrar el icono
+        // en la bandeja. La app sigue residente igual al cerrarla.
+        if (args.Contains("--gui"))
+            tray.OpenGuiWindow();
+
         return app.Run();
     }
 
