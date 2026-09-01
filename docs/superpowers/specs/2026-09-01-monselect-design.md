@@ -72,8 +72,8 @@ Ventana medida en vivo:
 
 ```
 proceso  rustdesk.exe (pid 23340)
-cmdline  "C:\Program Files\RustDesk\rustdesk.exe" --connect 1195735709
-título   WK-SIS-OPS-01 - Remote Desktop - RustDesk
+cmdline  "C:\Program Files\RustDesk\rustdesk.exe" --connect 123456789
+título   WK-EJEMPLO-01 - Remote Desktop - RustDesk
 class    RustdeskMultiWindow
 STYLE    0x150B0000 = WS_VISIBLE | WS_CLIPSIBLINGS | WS_MAXIMIZE
                     | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
@@ -144,10 +144,10 @@ version: 1
 
 monitors:                       # autogenerado en el primer arranque; los alias los renombra el usuario
   benq:
-    path: '\\?\DISPLAY#BNQ7820#7&25cebdba&0&UID268#{e6f07b5f-...}'
+    path: '\\?\DISPLAY#BNQ7820#7&1a2b3c4d&0&UID268#{e6f07b5f-...}'
     label: "BenQ G2220HDA (derecha)"
   vertical:
-    path: '\\?\DISPLAY#GSM57EE#7&25cebdba&0&UID264#{e6f07b5f-...}'
+    path: '\\?\DISPLAY#GSM57EE#7&1a2b3c4d&0&UID264#{e6f07b5f-...}'
     label: "LG M2380A (vertical)"
 
 defaults:
@@ -155,13 +155,13 @@ defaults:
   retry_ms: [0, 150, 400, 800]
 
 rules:
-  - name: RustDesk OPS-01
+  - name: RustDesk EJEMPLO-01
     enabled: true
     match:                      # todos los campos opcionales; los presentes se combinan con AND
       exe: "C:/Program Files/RustDesk/rustdesk.exe"
-      cmdline: "--connect 1195735709"
+      cmdline: "--connect 123456789"
       class: RustdeskMultiWindow
-      title: "^WK-SIS-OPS-01.*"
+      title: "^WK-EJEMPLO-01.*"
       aumid: null
     place:
       monitor: benq             # alias, o lista de alias cuando apply: rotate
@@ -243,7 +243,7 @@ Ni el serial EDID (duplicado o nulo en este hardware) ni `\\.\DISPLAYn` (se reas
 Se usa `QueryDisplayConfig` con `DisplayConfigGetDeviceInfo(DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME)`, que devuelve `monitorDevicePath`:
 
 ```
-\\?\DISPLAY#BNQ7820#7&25cebdba&0&UID268#{e6f07b5f-...}
+\\?\DISPLAY#BNQ7820#7&1a2b3c4d&0&UID268#{e6f07b5f-...}
 ```
 
 Estable entre reinicios y reconexiones, único por puerto físico.

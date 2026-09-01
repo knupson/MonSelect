@@ -25,10 +25,10 @@ El command line como criterio permite, por ejemplo, mandar cada sesión de RustD
 
 ```yaml
 rules:
-  - name: RustDesk OPS-01
+  - name: RustDesk EJEMPLO-01
     match:
       exe: "C:/Program Files/RustDesk/rustdesk.exe"
-      cmdline: "--connect 1195735709"
+      cmdline: "--connect 123456789"
     place:
       monitor: benq
       state: borderless
