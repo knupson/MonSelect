@@ -9,12 +9,17 @@ public sealed class TrayHost : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly Bootstrap _bootstrap;
+    private readonly Icon _trayIcon = TrayIcon.Create();
+    private GuiWindow? _gui;
 
     public TrayHost(Bootstrap bootstrap)
     {
         _bootstrap = bootstrap;
 
         var menu = new ContextMenuStrip();
+        var openItem = menu.Items.Add("Abrir MonSelect", null, (_, _) => OpenGui());
+        openItem.Font = new Font(openItem.Font, System.Drawing.FontStyle.Bold);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Aplicar reglas ahora", null, (_, _) => ApplyAll());
         menu.Items.Add("Abrir rules.yaml", null, (_, _) => OpenConfig());
         menu.Items.Add("Recargar config", null, (_, _) => _bootstrap.ReloadConfig());
@@ -24,13 +29,34 @@ public sealed class TrayHost : IDisposable
 
         _icon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = _trayIcon,
             Visible = true,
             ContextMenuStrip = menu,
         };
+        _icon.DoubleClick += (_, _) => OpenGui();
 
         _bootstrap.ConfigChanged += UpdateTooltip;
         UpdateTooltip();
+    }
+
+    /// <summary>
+    /// Abre la GUI o, si ya está abierta, la trae al frente en vez de apilar
+    /// ventanas — es la única ventana que MonSelect crea, y con una alcanza.
+    /// </summary>
+    private void OpenGui()
+    {
+        if (_gui is null)
+        {
+            _gui = new GuiWindow(_bootstrap);
+            _gui.Closed += (_, _) => _gui = null;
+            _gui.Show();
+            return;
+        }
+
+        if (_gui.WindowState == System.Windows.WindowState.Minimized)
+            _gui.WindowState = System.Windows.WindowState.Normal;
+
+        _gui.Activate();
     }
 
     /// <summary>
@@ -48,9 +74,13 @@ public sealed class TrayHost : IDisposable
         }
 
         var error = _bootstrap.LastConfigError;
-        _icon.Text = error is null
-            ? "MonSelect"
-            : "MonSelect — error de config";
+        var ruleCount = _bootstrap.CurrentRuleSet.Rules.Count;
+        var summary = $"{ruleCount} regla{(ruleCount == 1 ? string.Empty : "s")} cargada{(ruleCount == 1 ? string.Empty : "s")}";
+
+        // NotifyIcon.Text tiene un límite duro de 63 caracteres; se corta en
+        // silencio si se pasa, así que hay que armarlo corto a propósito.
+        var text = error is null ? $"MonSelect — {summary}" : "MonSelect — error de config";
+        _icon.Text = text.Length > 63 ? text[..63] : text;
 
         if (error is not null)
         {
@@ -105,5 +135,7 @@ public sealed class TrayHost : IDisposable
     {
         _icon.Visible = false;
         _icon.Dispose();
+        _trayIcon.Dispose();
+        _gui?.Close();
     }
 }

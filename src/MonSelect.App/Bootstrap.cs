@@ -25,6 +25,8 @@ public sealed class Bootstrap : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly ApplyLogFile _file = new();
     private readonly WindowPlacer _placer;
+    private readonly MonitorRegistry _monitorRegistry;
+    private readonly WindowProbe _probe;
 
     private FileSystemWatcher? _configWatcher;
     private CancellationTokenSource? _reloadDebounce;
@@ -33,6 +35,33 @@ public sealed class Bootstrap : IDisposable
     public ApplyLog Log { get; } = new();
     public string? LastConfigError { get; private set; }
 
+    /// <summary>
+    /// Último RuleSet cargado con éxito. La GUI lo necesita para mostrar qué
+    /// regla matchea cada ventana (RuleMatcher.FirstMatch) y para resolver alias
+    /// de monitor — RuleEngine lo guarda puertas adentro y no lo expone.
+    /// </summary>
+    public RuleSet CurrentRuleSet { get; private set; } = RuleSet.Empty;
+
+    /// <summary>
+    /// Sólo para lecturas desde la GUI (GetVisibleBounds al crear una regla,
+    /// inspección de ventanas para la tabla). Cualquier llamada que mute una
+    /// ventana tiene que pasar por <see cref="Post"/>, no usar esto directo.
+    /// </summary>
+    public IWindowSystem WindowSystem => _windowSystem;
+
+    /// <summary>Monitores conectados, para el mapa de la GUI y para resolver alias.</summary>
+    public MonitorRegistry Monitors => _monitorRegistry;
+
+    /// <summary>
+    /// Acceso directo al subsistema de monitores, para GetMonitorForRect — lo
+    /// que necesita la GUI para saber en qué monitor está cada ventana abierta.
+    /// MonitorRegistry no lo envuelve porque RuleEngine no lo necesita.
+    /// </summary>
+    public IMonitorSystem MonitorSystem => _monitorSystem;
+
+    /// <summary>Describe una ventana. Sólo lectura, segura desde el hilo de la GUI.</summary>
+    public WindowProbe Probe => _probe;
+
     public event Action? ConfigChanged;
 
     public Bootstrap()
@@ -40,10 +69,12 @@ public sealed class Bootstrap : IDisposable
         var styles = new StyleStore(ConfigPaths.Borderless);
         styles.Load();
         _placer = new WindowPlacer(_windowSystem, styles);
+        _monitorRegistry = new MonitorRegistry(_monitorSystem);
+        _probe = new WindowProbe(_windowSystem);
 
         Engine = new RuleEngine(
-            new WindowProbe(_windowSystem),
-            new MonitorRegistry(_monitorSystem),
+            _probe,
+            _monitorRegistry,
             _placer,
             new RetryScheduler(_windowSystem, new RealDelay()),
             Log);
@@ -118,7 +149,9 @@ public sealed class Bootstrap : IDisposable
     {
         try
         {
-            Engine.UpdateRules(YamlStore.Load(ConfigPaths.Rules));
+            var set = YamlStore.Load(ConfigPaths.Rules);
+            Engine.UpdateRules(set);
+            CurrentRuleSet = set;
             LastConfigError = null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -126,7 +159,9 @@ public sealed class Bootstrap : IDisposable
             try
             {
                 Thread.Sleep(50);
-                Engine.UpdateRules(YamlStore.Load(ConfigPaths.Rules));
+                var set = YamlStore.Load(ConfigPaths.Rules);
+                Engine.UpdateRules(set);
+                CurrentRuleSet = set;
                 LastConfigError = null;
             }
             catch (RuleSetFormatException retryEx)
