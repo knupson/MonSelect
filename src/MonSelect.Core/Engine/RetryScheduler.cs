@@ -85,7 +85,15 @@ public sealed class RetryScheduler(IWindowSystem system, IDelay delay)
                 if (!comparable)
                     return new RetryOutcome(true, i + 1, observed);
 
-                var actual = system.GetBounds(handle);
+                // Normal compara el rect VISIBLE: el target salió de una regla
+                // escrita en coordenadas visibles y WindowPlacer lo convirtió al
+                // rect externo al posicionar. Comparar contra GetBounds mide el
+                // externo — 7px más grande por el marco invisible de DWM — así que
+                // nunca coincidía y toda colocación normal agotaba los reintentos
+                // y se reportaba como Resisted, aunque la ventana estuviera exacta.
+                var actual = state == WindowState.Normal
+                    ? system.GetVisibleBounds(handle)
+                    : system.GetBounds(handle);
                 observed.Add(actual);
 
                 if (ct.IsCancellationRequested)

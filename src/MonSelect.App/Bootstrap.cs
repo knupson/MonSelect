@@ -83,6 +83,10 @@ public sealed class Bootstrap : IDisposable
     /// <summary>Carga la config sin instalar el hook. Para el modo --apply-now.</summary>
     public void StartForOneShot()
     {
+        // Mismo sink de archivo que el modo residente: sin esto, --apply-now
+        // coloca ventanas sin dejar rastro y no hay forma de ver qué pasó.
+        Log.EntryAdded += _file.Write;
+
         EnsureConfigExists();
         ReloadConfig();
     }
