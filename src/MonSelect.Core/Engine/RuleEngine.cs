@@ -37,6 +37,9 @@ public sealed class RuleEngine(
         {
             _set = set;
             _rotation.Clear();
+            // Un reload es una decisión nueva del usuario: una regla first no
+            // puede seguir ignorando procesos vivos por lo que pasó antes de guardar.
+            _firstSeen.Clear();
         }
     }
 
@@ -72,57 +75,78 @@ public sealed class RuleEngine(
 
     private async Task<ApplyResult> HandleCoreAsync(nint handle, CancellationToken ct)
     {
-        var info = probe.Describe(handle);
-        if (info is null)
-            return ApplyResult.NoMatch;
+        // info/rule quedan visibles en el catch para que la entrada de error
+        // lleve el título y la regla, si ya se habían resuelto antes de fallar.
+        WindowInfo? info = null;
+        Rule? rule = null;
 
-        RuleSet set;
-        lock (_gate)
-            set = _set;
-
-        var rule = RuleMatcher.FirstMatch(set.Rules, info);
-        if (rule is null)
-            return Record(info, null, ApplyResult.NoMatch, 0, null);
-
-        if (rule.Apply == ApplyMode.First)
+        try
         {
+            info = probe.Describe(handle);
+            if (info is null)
+                return ApplyResult.NoMatch;
+
+            RuleSet set;
             lock (_gate)
+                set = _set;
+
+            rule = RuleMatcher.FirstMatch(set.Rules, info);
+            if (rule is null)
+                return Record(info, null, ApplyResult.NoMatch, 0, null);
+
+            if (rule.Apply == ApplyMode.First)
             {
-                if (!_firstSeen.Add((rule.Name, info.ProcessId)))
-                    return Record(info, rule, ApplyResult.Ignored, 0, "ya se colocó la primera ventana");
+                lock (_gate)
+                {
+                    if (!_firstSeen.Add((rule.Name, info.ProcessId)))
+                        return Record(info, rule, ApplyResult.Ignored, 0, "ya se colocó la primera ventana");
+                }
             }
+
+            var alias = NextAlias(rule);
+            if (!set.Monitors.TryGetValue(alias, out var declared))
+                return Record(info, rule, ApplyResult.Skipped, 0,
+                    $"el alias '{alias}' no está declarado en el bloque monitors");
+
+            var monitor = monitors.Resolve(new MonitorId(declared.Path), rule.IfMissing, info.Bounds);
+            if (monitor is null)
+                return Record(info, rule, ApplyResult.Skipped, 0,
+                    $"el monitor '{alias}' no está conectado y la política es {rule.IfMissing}");
+
+            var target = PlacementCalculator.Compute(
+                monitor, rule.Place.State, rule.Place.Rect, info.Bounds);
+
+            var startTicks = probe.StartTicksOf(info.ProcessId);
+
+            var outcome = await retries.RunAsync(
+                handle,
+                rule.EffectiveRetryMs,
+                target.ExpectedBounds,
+                () => placer.Apply(handle, info.ProcessId, startTicks, target),
+                ct).ConfigureAwait(false);
+
+            var detail = $"{monitor.GdiName} {rule.Place.State}";
+            if (!outcome.Settled && outcome.Observed.Count > 0)
+                detail += $"; último rect observado {outcome.Observed[^1]}";
+
+            return Record(
+                info, rule,
+                outcome.Settled ? ApplyResult.Applied : ApplyResult.Resisted,
+                outcome.Attempts, detail);
         }
-
-        var alias = NextAlias(rule);
-        if (!set.Monitors.TryGetValue(alias, out var declared))
-            return Record(info, rule, ApplyResult.Skipped, 0,
-                $"el alias '{alias}' no está declarado en el bloque monitors");
-
-        var monitor = monitors.Resolve(new MonitorId(declared.Path), rule.IfMissing, info.Bounds);
-        if (monitor is null)
-            return Record(info, rule, ApplyResult.Skipped, 0,
-                $"el monitor '{alias}' no está conectado y la política es {rule.IfMissing}");
-
-        var target = PlacementCalculator.Compute(
-            monitor, rule.Place.State, rule.Place.Rect, info.Bounds);
-
-        var startTicks = probe.StartTicksOf(info.ProcessId);
-
-        var outcome = await retries.RunAsync(
-            handle,
-            rule.EffectiveRetryMs,
-            target.ExpectedBounds,
-            () => placer.Apply(handle, info.ProcessId, startTicks, target),
-            ct).ConfigureAwait(false);
-
-        var detail = $"{monitor.GdiName} {rule.Place.State}";
-        if (!outcome.Settled && outcome.Observed.Count > 0)
-            detail += $"; último rect observado {outcome.Observed[^1]}";
-
-        return Record(
-            info, rule,
-            outcome.Settled ? ApplyResult.Applied : ApplyResult.Resisted,
-            outcome.Attempts, detail);
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Sin esto, una excepción de cualquier paso (probe, matcher, resolve,
+            // compute, placer o retries) se va como fire-and-forget desde el hook
+            // thread y ApplyLog no muestra nada: el único lugar donde el usuario
+            // puede ver por qué una ventana no se movió queda en blanco.
+            // "error:" distingue esto de un Resisted normal por no asentarse.
+            var title = info?.Title ?? string.Empty;
+            log.Add(new ApplyEntry(
+                DateTimeOffset.Now, handle, title, rule?.Name, ApplyResult.Resisted, 0,
+                $"error: {ex.GetType().Name}: {ex.Message}"));
+            return ApplyResult.Resisted;
+        }
     }
 
     /// <summary>Para Rotate devuelve el siguiente monitor de la lista; si no, el primero.</summary>

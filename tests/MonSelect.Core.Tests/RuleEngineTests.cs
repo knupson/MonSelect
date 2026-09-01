@@ -215,6 +215,50 @@ public class RuleEngineTests : IDisposable
         Assert.Contains(log.Recent(), e => e.Result == ApplyResult.Resisted && e.Attempts == 2);
     }
 
+    /// <summary>Probe de mentira que siempre explota, para el finding de contención de excepciones.</summary>
+    private sealed class ThrowingProbe : IWindowDescriber
+    {
+        public WindowInfo? Describe(nint handle) => throw new InvalidOperationException("boom");
+
+        public long StartTicksOf(uint pid) => 1;
+    }
+
+    [Fact]
+    public async Task An_exception_in_the_pipeline_is_logged_instead_of_escaping()
+    {
+        var styles = new StyleStore(Path.Combine(_dir.FullName, "borderless.json"));
+        var log = new ApplyLog();
+        var engine = new RuleEngine(
+            new ThrowingProbe(),
+            new MonitorRegistry(_monitors),
+            new WindowPlacer(_windows, styles),
+            new RetryScheduler(_windows, new NoDelay()),
+            log);
+        engine.UpdateRules(SetWith(MakeRule("rustdesk")));
+
+        var result = await engine.HandleAsync(1, CancellationToken.None);
+
+        Assert.Equal(ApplyResult.Resisted, result);
+        Assert.Contains(log.Recent(), e => e.Detail is not null && e.Detail.Contains("boom"));
+    }
+
+    [Fact]
+    public async Task UpdateRules_lets_a_first_mode_rule_place_again_for_a_process_it_already_saw()
+    {
+        _windows.Add(1, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);
+        _windows.SetObservedBounds(1, FakeMonitorSystem.Right.WorkArea);
+        var described = new Dictionary<nint, WindowInfo> { [1] = Describe(1) };
+        var set = SetWith(MakeRule("primera", apply: ApplyMode.First));
+        var (engine, _) = Build(set, described);
+
+        Assert.Equal(ApplyResult.Applied, await engine.HandleAsync(1, CancellationToken.None));
+
+        // Simula un reload de config: el usuario guardó el archivo de nuevo.
+        engine.UpdateRules(set);
+
+        Assert.Equal(ApplyResult.Applied, await engine.HandleAsync(1, CancellationToken.None));
+    }
+
     [Fact]
     public void The_log_keeps_only_the_most_recent_entries()
     {
