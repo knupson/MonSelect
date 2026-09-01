@@ -6,12 +6,15 @@ namespace MonSelect.Core.Tests;
 
 public class WindowToRuleTests
 {
+    // El command line crudo, como lo devuelve el PEB (ProcessQuery.GetCommandLine):
+    // el ejecutable primero — acá entre comillas, como Windows lo arma cuando el
+    // path tiene espacios — y recién después los argumentos.
     private static WindowInfo MakeWindow(WindowState state = WindowState.Normal)
         => new(
             Handle: 42,
             ProcessId: 100,
             ExePath: @"C:\Program Files\RustDesk\rustdesk.exe",
-            CommandLine: "--connect 123456789",
+            CommandLine: "\"C:\\Program Files\\RustDesk\\rustdesk.exe\" --connect 123456789",
             ClassName: "RustdeskMultiWindow",
             Title: "WK-EJEMPLO-01 - Remote Desktop - RustDesk",
             Aumid: null,
@@ -32,7 +35,7 @@ public class WindowToRuleTests
     }
 
     [Fact]
-    public void Includes_command_line_only_when_asked()
+    public void Command_line_captures_only_the_arguments_not_the_quoted_exe_when_asked()
     {
         var rule = WindowToRule.Convert(
             MakeWindow(), Rect.FromLtrb(3000, 0, 4920, 1080), "benq", "RustDesk",
@@ -42,7 +45,52 @@ public class WindowToRuleTests
     }
 
     [Fact]
-    public void Derives_an_anchored_escaped_regex_from_the_title_when_no_override_is_given()
+    public void A_process_launched_with_no_arguments_gets_no_command_line_criterion()
+    {
+        var window = MakeWindow() with
+        {
+            CommandLine = "\"C:\\Program Files\\JDownloader\\JDownloader2.exe\" ",
+        };
+
+        var rule = WindowToRule.Convert(
+            window, Rect.FromLtrb(3000, 0, 4920, 1080), "benq", "n",
+            includeCommandLine: true, includeTitle: false);
+
+        Assert.Null(rule.Match.CommandLine);
+    }
+
+    [Fact]
+    public void A_command_line_override_is_used_verbatim_instead_of_the_derived_arguments()
+    {
+        var rule = WindowToRule.Convert(
+            MakeWindow(), Rect.FromLtrb(3000, 0, 4920, 1080), "benq", "n",
+            includeCommandLine: true, includeTitle: false, commandLineArguments: "--headless");
+
+        Assert.Equal("--headless", rule.Match.CommandLine);
+    }
+
+    [Fact]
+    public void Derives_an_unanchored_regex_from_the_stable_part_of_the_title_when_no_override_is_given()
+    {
+        // El resto del título — versión, banner de notificación transitorio —
+        // cambia todo el tiempo; sólo "JDownloader" es estable.
+        var window = MakeWindow() with { Title = "JDownloader 2 - ¡Actualizaciones Disponibles!" };
+
+        var rule = WindowToRule.Convert(
+            window, Rect.FromLtrb(3000, 0, 4920, 1080), "benq", "n",
+            includeCommandLine: false, includeTitle: true);
+
+        Assert.Equal("JDownloader", rule.Match.Title);
+        Assert.Equal(WindowToRule.DefaultTitleRegex(window.Title), rule.Match.Title);
+
+        // Y sigue matcheando después de que el título vuelva a la normalidad,
+        // sin el banner — porque nunca estuvo anclado con ^...$.
+        Assert.Matches(rule.Match.Title!, window.Title);
+        Assert.Matches(rule.Match.Title!, "JDownloader 2");
+    }
+
+    [Fact]
+    public void The_derived_title_regex_only_escapes_regex_metacharacters_not_spaces()
     {
         var window = MakeWindow() with { Title = "Weird [Title] (with) special.chars" };
 
@@ -50,8 +98,18 @@ public class WindowToRuleTests
             window, Rect.FromLtrb(3000, 0, 4920, 1080), "benq", "n",
             includeCommandLine: false, includeTitle: true);
 
-        Assert.Equal(WindowToRule.DefaultTitleRegex(window.Title), rule.Match.Title);
+        // La parte estable es sólo "Weird" (letras hasta el primer no-letra);
+        // no queda ningún metacaracter de regex ["[", "(", "."] adentro.
+        Assert.Equal("Weird", rule.Match.Title);
         Assert.Matches(rule.Match.Title!, window.Title);
+    }
+
+    [Fact]
+    public void A_title_with_no_leading_letters_has_no_suggested_default()
+    {
+        var window = MakeWindow() with { Title = "7-Zip File Manager" };
+
+        Assert.Equal("", WindowToRule.SuggestedTitleSubstring(window.Title));
     }
 
     [Fact]

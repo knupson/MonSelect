@@ -164,6 +164,53 @@ public class YamlStoreTests
         }
     }
 
+    /// <summary>
+    /// Regresión: un título capturado con "¡Actualizaciones Disponibles!"
+    /// llegó a rules.yaml con el "¡" reemplazado por el carácter de
+    /// reemplazo Unicode (U+FFFD) — alguna conversión en el camino perdía
+    /// bytes no-ASCII. Este test cubre acentos, ¡¿ y un carácter fuera del
+    /// BMP (un emoji, que en UTF-16 es un par subrogado) tanto en el título
+    /// como en el nombre de la regla, para que una futura regresión de
+    /// encoding la agarre acá y no en la máquina del usuario.
+    /// </summary>
+    [Fact]
+    public void Round_trips_non_ascii_spanish_text_and_a_non_bmp_character()
+    {
+        const string name = "JDownloader 2 🎉 (¡ó, café!)";
+        const string title = "JDownloader 2 - ¡Actualizaciones Disponibles! 🎉";
+
+        var set = new RuleSet(
+            1,
+            new Dictionary<string, MonitorAlias>(),
+            new[]
+            {
+                new Rule(
+                    name,
+                    new MatchCriteria(Title: title),
+                    new RulePlacement(new[] { "display4" }, WindowState.Maximized, null)),
+            });
+
+        var dir = Directory.CreateTempSubdirectory("monselect-tests");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "rules.yaml");
+            YamlStore.Save(path, set);
+
+            var raw = File.ReadAllText(path);
+            Assert.DoesNotContain('�', raw);
+            Assert.Contains(name, raw);
+            Assert.Contains(title, raw);
+
+            var reloaded = YamlStore.Load(path);
+            Assert.Equal(name, reloaded.Rules[0].Name);
+            Assert.Equal(title, reloaded.Rules[0].Match.Title);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public void Invalid_yaml_throws_a_readable_error()
     {

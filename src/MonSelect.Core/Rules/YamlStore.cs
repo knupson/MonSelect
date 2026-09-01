@@ -14,12 +14,25 @@ namespace MonSelect.Core.Rules;
 /// </summary>
 public static class YamlStore
 {
+    /// <summary>
+    /// UTF-8 sin BOM, explícito. Un título capturado puede traer acentos, ¡¿ o
+    /// un emoji (par subrogado en UTF-16, cuatro bytes en UTF-8): dejar la
+    /// codificación librada al overload sin parámetros de File.ReadAllText/
+    /// WriteAllText funciona hoy porque su default también es este mismo UTF-8
+    /// sin BOM, pero es un default implícito — un cambio futuro a, por
+    /// ejemplo, un StreamWriter sin encoding explícito (que sí usa la
+    /// codificación ANSI del sistema) volvería a convertir "¡" en el
+    /// carácter de reemplazo U+FFFD sin que nada lo marque en el code
+    /// review. Nombrarlo acá cierra esa puerta.
+    /// </summary>
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     public static RuleSet Load(string path)
     {
         if (!File.Exists(path))
             return RuleSet.Empty;
 
-        return Parse(File.ReadAllText(path));
+        return Parse(File.ReadAllText(path, Utf8NoBom));
     }
 
     public static RuleSet Parse(string yaml)
@@ -54,7 +67,7 @@ public static class YamlStore
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        File.WriteAllText(path, Render(set));
+        File.WriteAllText(path, Render(set), Utf8NoBom);
     }
 
     /// <summary>

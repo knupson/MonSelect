@@ -414,6 +414,30 @@
                                                  ElementStyle="{StaticResource Mono}"/>
                             <DataGridTextColumn Header="DESTINO" Binding="{Binding Destination}" Width="0.85*"/>
                             <DataGridTextColumn Header="ESTADO" Binding="{Binding StateLabel}" Width="0.75*"/>
+                            <!--
+                                F: una regla muerta (título que cambió, exe que se movió) se ve acá
+                                mismo, sin tener que reabrir la app para descubrirlo por NoMatch en
+                                el log. 0 se resalta en rojo — MISMO chequeo en vivo que la columna
+                                de RuleEditorDialog, contra las ventanas abiertas AHORA.
+                            -->
+                            <DataGridTemplateColumn Header="VENTANAS ABIERTAS QUE MATCHEAN" Width="0.9*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding MatchCountLabel}" ToolTip="Ventanas abiertas ahora mismo cuyos criterios coinciden con esta regla.">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{StaticResource MatchBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding MatchCount}" Value="0">
+                                                            <Setter Property="Foreground" Value="{StaticResource Alarm}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTemplateColumn Header="" Width="256">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>

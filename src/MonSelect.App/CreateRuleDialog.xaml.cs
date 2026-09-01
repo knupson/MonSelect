@@ -40,23 +40,89 @@ internal partial class CreateRuleDialog : Window
         InitializeComponent();
         NameBox.Text = DefaultName(row);
         NameBox.SelectAll();
+
+        SetupTitleField();
+        SetupCommandLineField();
+
         UpdatePreview();
     }
 
     private static string DefaultName(OpenWindowRow row)
         => string.IsNullOrWhiteSpace(row.Process) ? row.Title : row.Process;
 
+    /// <summary>
+    /// Precarga TitleBox con la parte estable del título (F: "el usuario opta
+    /// por el título, no por el título entero anclado") y explica en qué caso
+    /// no hay nada estable para sugerir.
+    /// </summary>
+    private void SetupTitleField()
+    {
+        if (!_includeTitle)
+        {
+            TitleFieldPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var suggested = WindowToRule.DefaultTitleRegex(_row.Info.Title);
+        TitleBox.Text = suggested;
+        TitleHint.Text = suggested.Length == 0
+            ? "El título no empieza con una letra: no hay una parte estable para sugerir. " +
+              "Escribí un patrón a mano, o dejá esto vacío para no incluir título en la regla."
+            : "Coincide como substring en cualquier parte del título — no está anclado, así que " +
+              "sobrevive a que le cambien un contador o un banner alrededor. Editalo si hace falta.";
+    }
+
+    /// <summary>
+    /// Precarga CmdlineBox con sólo los argumentos (F: "no el exe completo
+    /// entre comillas, que ya está en match.exe") y avisa cuando no hay
+    /// argumentos en vez de guardar un patrón vacío-pero-no-null.
+    /// </summary>
+    private void SetupCommandLineField()
+    {
+        if (!_includeCommandLine)
+        {
+            CmdlineFieldPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var args = WindowToRule.ArgumentsOnly(_row.Info.CommandLine);
+        if (args is null)
+        {
+            CmdlineBox.Text = string.Empty;
+            CmdlineHint.Text = "Esta ventana no tiene argumentos de línea de comando; no se va a agregar " +
+                                "cmdline a la regla.";
+        }
+        else
+        {
+            CmdlineBox.Text = args;
+            CmdlineHint.Text = "Sólo los argumentos — el ejecutable ya lo identifica match.exe. Editalo si hace falta.";
+        }
+    }
+
     private void NameBox_TextChanged(object sender, TextChangedEventArgs e) => UpdatePreview();
+
+    private void TitleBox_TextChanged(object sender, TextChangedEventArgs e) => UpdatePreview();
+
+    private void CmdlineBox_TextChanged(object sender, TextChangedEventArgs e) => UpdatePreview();
 
     private void UpdatePreview()
     {
         var name = string.IsNullOrWhiteSpace(NameBox.Text) ? "(sin nombre)" : NameBox.Text.Trim();
 
+        // Vacío (título sin parte estable, ventana sin argumentos, o el
+        // usuario borró todo a mano) significa "no ofrecer nada" — un patrón
+        // vacío-pero-no-null matchearía de más, que es peor que omitir el
+        // criterio.
+        var titleOverride = _includeTitle && !string.IsNullOrWhiteSpace(TitleBox.Text) ? TitleBox.Text.Trim() : null;
+        var cmdlineOverride = _includeCommandLine && !string.IsNullOrWhiteSpace(CmdlineBox.Text) ? CmdlineBox.Text.Trim() : null;
+        var includeTitle = titleOverride is not null;
+        var includeCommandLine = cmdlineOverride is not null;
+
         try
         {
             var rule = WindowToRule.Convert(
-                _row.Info, _row.VisibleBounds, _monitorAlias, name, _includeCommandLine, _includeTitle,
-                bleed: _bleed);
+                _row.Info, _row.VisibleBounds, _monitorAlias, name, includeCommandLine, includeTitle,
+                titleRegex: titleOverride, commandLineArguments: cmdlineOverride, bleed: _bleed);
             Result = rule;
             YamlPreview.Text = YamlStore.RenderRule(rule);
         }

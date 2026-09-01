@@ -215,13 +215,26 @@ internal partial class GuiWindow : Window
     private void RefreshRules()
     {
         var set = _bootstrap.CurrentRuleSet;
-        _ruleRows = set.Rules.Select(RuleRow.From).ToList();
+        var openWindows = DescribeOpenWindows();
+        _ruleRows = set.Rules.Select(r => RuleRow.From(r, openWindows)).ToList();
         RulesGrid.ItemsSource = _ruleRows;
         RulesEmptyHint.Visibility = _ruleRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         RulesStatus.Text = set.Rules.Count == 0
             ? string.Empty
             : $"{set.Rules.Count} regla(s), {set.Rules.Count(r => r.Enabled)} habilitada(s). El orden de arriba hacia abajo es la prioridad.";
     }
+
+    /// <summary>
+    /// Mismo criterio que RuleEditorDialog.RenderMatches (título no vacío):
+    /// una ventana sin título no le importa al usuario ni puede matchear un
+    /// title: en una regla. Sólo lectura, segura desde el hilo de la GUI.
+    /// </summary>
+    private List<WindowInfo> DescribeOpenWindows()
+        => TopLevelWindows.Enumerate()
+            .Select(_bootstrap.Probe.Describe)
+            .Where(info => info is not null && info.Title.Length > 0)
+            .Select(info => info!)
+            .ToList();
 
     private void RulesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
