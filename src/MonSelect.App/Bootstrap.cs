@@ -49,6 +49,13 @@ public sealed class Bootstrap : IDisposable
             Log);
     }
 
+    /// <summary>Carga la config sin instalar el hook. Para el modo --apply-now.</summary>
+    public void StartForOneShot()
+    {
+        EnsureConfigExists();
+        ReloadConfig();
+    }
+
     public void Start()
     {
         EnsureConfigExists();
