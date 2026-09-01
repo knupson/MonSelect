@@ -16,7 +16,7 @@ public static class PlacementCalculator
     /// El valor sale de la verificación empírica de la Task 7; ver
     /// docs/superpowers/findings/windowplacement-coordinates.md.
     /// </summary>
-    public const bool WorkspaceOffsetApplies = false;
+    public static readonly bool WorkspaceOffsetApplies = false;
 
     public static TargetPlacement Compute(
         MonitorInfo monitor,
@@ -86,7 +86,6 @@ public static class PlacementCalculator
         if (!WorkspaceOffsetApplies)
             return screenRect;
 
-#pragma warning disable CS0162
         var dx = monitor.WorkArea.Left - monitor.Bounds.Left;
         var dy = monitor.WorkArea.Top - monitor.Bounds.Top;
 
@@ -95,6 +94,5 @@ public static class PlacementCalculator
             screenRect.Top - dy,
             screenRect.Right - dx,
             screenRect.Bottom - dy);
-#pragma warning restore CS0162
     }
 }
