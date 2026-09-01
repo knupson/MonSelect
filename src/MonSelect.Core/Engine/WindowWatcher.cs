@@ -5,21 +5,51 @@ using MonSelect.Core.Win32;
 namespace MonSelect.Core.Engine;
 
 /// <summary>
-/// Dueño del hook y del hilo que muta ventanas. Un solo hilo con message pump
-/// recibe los eventos y ejecuta las colocaciones: SetWindowPos desde varios
-/// hilos contra la misma ventana da resultados dependientes del orden, y los
-/// reintentos competirían entre sí.
+/// Dueño del hook de ventanas y de la cola que serializa toda mutación de
+/// ventanas. Corre en DOS hilos con roles estrictamente separados:
+///
+///  - el hilo del hook (<see cref="Pump"/>) sólo tiene el message pump que
+///    <c>SetWinEventHook(WINEVENT_OUTOFCONTEXT)</c> necesita para entregar
+///    callbacks. Nunca ejecuta código que pueda tocar una ventana ajena.
+///  - el hilo de colocación (<see cref="RunPlacementLoop"/>) consume una cola
+///    y ahí sí corren <see cref="WindowAppeared"/> y todo lo que llega por
+///    <see cref="Post"/>: placement, retries, <c>WindowPlacer.Revert</c>, etc.
+///
+/// Por qué están separados (hallazgo, no está en el spec original — ver
+/// docs/superpowers/findings/f1-acceptance.md y el commit que introdujo esto):
+/// <c>SetWindowPos</c>/<c>SetWindowPlacement</c> contra una ventana de OTRO
+/// proceso son llamadas síncronas que Windows resuelve enviando mensajes
+/// (WM_WINDOWPOSCHANGING/...) a la cola de esa ventana y esperando la
+/// respuesta. Si el proceso dueño de esa ventana está momentáneamente
+/// ocupado (o colgado), la llamada no vuelve hasta que esa cola se despeje —
+/// sin timeout. El primer intento de cada colocación corre síncrono (el
+/// primer retry_ms suele ser 0, y <c>Task.CompletedTask</c> no suspende el
+/// await), así que si esto corriera en el mismo hilo que <c>GetMessageW</c>
+/// del hook, una sola ventana lenta bloquearía la entrega de CUALQUIER
+/// evento nuevo — el proceso queda "Responding: True" pero deja de procesar
+/// ventanas, sin excepción y sin señal, hasta que esa llamada vuelve (si
+/// vuelve). Se reprodujo de forma controlada con una ventana que duerme
+/// adentro de WM_WINDOWPOSCHANGING: con el hook y el placement en el mismo
+/// hilo, el log deja de crecer por completo mientras dura el bloqueo.
+///
+/// El spec (sección 4.2) dice "un único hilo dueño de las ventanas, y ese
+/// mismo thread ejecuta el placement". Esta clase sigue garantizando la
+/// parte que importa de esa regla — un solo hilo ejecuta placement, así que
+/// dos colocaciones contra la misma ventana nunca se interleavean y un retry
+/// no compite contra sí mismo — pero ya NO es el hilo del hook. Esa mitad de
+/// la frase original está mal: acoplar hook y placement es exactamente lo
+/// que produce el cuelgue.
 /// </summary>
 public sealed class WindowWatcher : IDisposable
 {
-    private const uint WM_RUN_WORK = 0x0400 + 1; // WM_APP + 1
     private const uint WM_QUIT_PUMP = 0x0400 + 2;
 
-    private readonly ConcurrentQueue<Action> _queue = new();
-    private readonly ManualResetEventSlim _ready = new(false);
+    private readonly BlockingCollection<Action> _placementQueue = new();
+    private readonly ManualResetEventSlim _hookReady = new(false);
 
-    private Thread? _thread;
-    private uint _threadId;
+    private Thread? _hookThread;
+    private Thread? _placementThread;
+    private uint _hookThreadId;
     private nint _hook;
     private int _disposed;
 
@@ -29,39 +59,43 @@ public sealed class WindowWatcher : IDisposable
     private NativeMethods.WinEventProc? _callback;
     private GCHandle _callbackHandle;
 
-    /// <summary>Se dispara en el hilo dueño, con el hwnd de la ventana que apareció.</summary>
+    /// <summary>Se dispara en el hilo de colocación, con el hwnd de la ventana que apareció.</summary>
     public event Action<nint>? WindowAppeared;
 
     public void Start()
     {
-        if (_thread is not null)
+        if (_hookThread is not null)
             throw new InvalidOperationException("El watcher ya está corriendo.");
 
-        _thread = new Thread(Pump) { IsBackground = true, Name = "MonSelect.WindowWatcher" };
-        _thread.SetApartmentState(ApartmentState.STA);
-        _thread.Start();
-        _ready.Wait();
+        _placementThread = new Thread(RunPlacementLoop)
+        {
+            IsBackground = true,
+            Name = "MonSelect.PlacementWorker",
+        };
+        _placementThread.Start();
+
+        _hookThread = new Thread(Pump) { IsBackground = true, Name = "MonSelect.WindowWatcher" };
+        _hookThread.SetApartmentState(ApartmentState.STA);
+        _hookThread.Start();
+        _hookReady.Wait();
     }
 
-    /// <summary>Encola trabajo para que corra en el hilo dueño de las ventanas.</summary>
-    /// <remarks>
-    /// El orden importa: encolar primero y recién después revisar <see cref="_threadId"/>
-    /// garantiza que, para cuando este método decide si puede despertar al pump, el
-    /// trabajo ya está en la cola — nunca al revés. Si <see cref="_threadId"/> todavía
-    /// es 0 (Post corrió antes de que el pump lo publicara), el mensaje de despertar se
-    /// omite acá, pero el pump hace un catch-up apenas arranca (ver <see cref="Pump"/>)
-    /// así el ítem no queda encallado.
-    /// </remarks>
-    public void Post(Action work)
+    /// <summary>
+    /// Encola trabajo en el hilo de colocación — el mismo que procesa
+    /// <see cref="WindowAppeared"/> — para que toda mutación de ventanas quede
+    /// serializada contra el mismo dueño.
+    /// </summary>
+    public void Post(Action work) => _placementQueue.Add(work);
+
+    private void RunPlacementLoop()
     {
-        _queue.Enqueue(work);
-        if (_threadId != 0)
-            NativeMethods.PostThreadMessageW(_threadId, WM_RUN_WORK, 0, 0);
+        foreach (var work in _placementQueue.GetConsumingEnumerable())
+            RunSafely(work);
     }
 
     private void Pump()
     {
-        _threadId = NativeMethods.GetCurrentThreadId();
+        _hookThreadId = NativeMethods.GetCurrentThreadId();
 
         _callback = OnWinEvent;
         _callbackHandle = GCHandle.Alloc(_callback);
@@ -75,27 +109,12 @@ public sealed class WindowWatcher : IDisposable
             0,
             NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
 
-        _ready.Set();
-
-        // Post() puede haber corrido mientras _threadId todavía era 0 (antes de la
-        // línea de arriba en esta misma función) y, en ese caso, no envió el mensaje
-        // de despertar. Cualquier trabajo encolado en esa ventana ya está en _queue
-        // para cuando llegamos acá, así que un catch-up ahora evita que se quede
-        // encallado hasta que llegue otro Post() posterior por casualidad.
-        if (!_queue.IsEmpty)
-            NativeMethods.PostThreadMessageW(_threadId, WM_RUN_WORK, 0, 0);
+        _hookReady.Set();
 
         while (NativeMethods.GetMessageW(out var msg, 0, 0, 0) > 0)
         {
             if (msg.message == WM_QUIT_PUMP)
                 break;
-
-            if (msg.message == WM_RUN_WORK)
-            {
-                while (_queue.TryDequeue(out var work))
-                    RunSafely(work);
-                continue;
-            }
 
             NativeMethods.TranslateMessage(ref msg);
             NativeMethods.DispatchMessageW(ref msg);
@@ -115,12 +134,15 @@ public sealed class WindowWatcher : IDisposable
         if (hwnd == 0 || !NativeMethods.IsWindow(hwnd))
             return;
 
-        RunSafely(() => WindowAppeared?.Invoke(hwnd));
+        // Este callback corre en el hilo del hook: encolar y volver ya mismo es
+        // obligatorio. Nada de lo que cuelga de WindowAppeared puede ejecutarse
+        // acá — ver el comentario de clase.
+        _placementQueue.Add(() => WindowAppeared?.Invoke(hwnd));
     }
 
     /// <summary>
-    /// Una excepción que escape al callback del hook mata el pump y con él todo
-    /// MonSelect, sin dejar rastro. Se traga acá y se registra.
+    /// Una excepción que escape al trabajo encolado mata el hilo de colocación
+    /// y con él todo MonSelect, sin dejar rastro. Se traga acá y se registra.
     /// </summary>
     private static void RunSafely(Action work)
     {
@@ -141,8 +163,10 @@ public sealed class WindowWatcher : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
-        if (_threadId != 0)
-            NativeMethods.PostThreadMessageW(_threadId, WM_QUIT_PUMP, 0, 0);
+        if (_hookThreadId != 0)
+            NativeMethods.PostThreadMessageW(_hookThreadId, WM_QUIT_PUMP, 0, 0);
+
+        _placementQueue.CompleteAdding();
 
         // UnhookWinEvent sólo corre en Pump(), después de que el loop de mensajes
         // termina. Hasta que eso pase, el hook sigue instalado y Windows puede seguir
@@ -151,9 +175,9 @@ public sealed class WindowWatcher : IDisposable
         // mientras el hook sigue activo, exactamente la violación de acceso sin rastro
         // que el GCHandle existe para evitar. Perder el handle hasta que el proceso
         // termine cuesta unos bytes; liberarlo antes de tiempo cuesta un crash.
-        var exited = _thread is null || _thread.Join(TimeSpan.FromSeconds(2));
+        var hookExited = _hookThread is null || _hookThread.Join(TimeSpan.FromSeconds(2));
 
-        if (exited)
+        if (hookExited)
         {
             if (_callbackHandle.IsAllocated)
                 _callbackHandle.Free();
@@ -161,9 +185,15 @@ public sealed class WindowWatcher : IDisposable
         else
         {
             Console.Error.WriteLine(
-                "[watcher] el hilo pump no terminó a tiempo; se retiene el GCHandle del callback a propósito.");
+                "[watcher] el hilo del hook no terminó a tiempo; se retiene el GCHandle del callback a propósito.");
         }
 
-        _ready.Dispose();
+        // El hilo de colocación puede estar bloqueado adentro de un SetWindowPos
+        // contra una ventana ajena que nunca vuelve; no vale la pena esperarlo
+        // más que esto — es background y el proceso va a terminar de todos modos.
+        _placementThread?.Join(TimeSpan.FromSeconds(2));
+
+        _hookReady.Dispose();
+        _placementQueue.Dispose();
     }
 }
