@@ -24,11 +24,11 @@ public sealed class WindowPlacer(IWindowSystem system, StyleStore styles)
     /// <summary>Devuelve false si la ventana nunca fue convertida a borderless.</summary>
     public bool Revert(nint handle)
     {
-        var record = styles.Forget(handle);
-        if (record is null)
+        if (!system.IsWindow(handle))
             return false;
 
-        if (!system.IsWindow(handle))
+        var record = styles.Forget(handle);
+        if (record is null)
             return false;
 
         system.SetStyle(handle, record.OriginalStyle);

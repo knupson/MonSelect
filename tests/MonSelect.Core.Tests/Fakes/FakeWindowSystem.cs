@@ -38,6 +38,8 @@ public sealed class FakeWindowSystem : IWindowSystem
         return w;
     }
 
+    public void Remove(nint handle) => _windows.Remove(handle);
+
     public Window this[nint handle] => _windows[handle];
 
     public bool IsWindow(nint handle) => _windows.ContainsKey(handle);

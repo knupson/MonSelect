@@ -115,4 +115,16 @@ public class WindowPlacerTests : IDisposable
 
         Assert.Empty(_system.Calls);
     }
+
+    [Fact]
+    public void Reverting_a_dead_window_preserves_the_record_for_later_recovery()
+    {
+        _placer.Apply(Hwnd, 1, 1, Target(ShowCommand.Maximized, strip: true));
+        Assert.True(_styles.TryGet(Hwnd, out _)); // Confirm record exists
+
+        _system.Remove(Hwnd); // Window dies
+
+        Assert.False(_placer.Revert(Hwnd)); // Returns false because window is gone
+        Assert.True(_styles.TryGet(Hwnd, out _)); // Record still exists, not consumed
+    }
 }
