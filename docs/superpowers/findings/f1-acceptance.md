@@ -55,6 +55,30 @@ arranque de la app con estos cuatro alias (`primary`, `display2`, `display3`,
 
 ## Hallazgo no solicitado, y el más importante de los seis: **el motor se cuelga en silencio**
 
+> **Actualización 2026-09-01 — este hallazgo se dio por cerrado dos veces, y la
+> primera vez estaba mal.** Después de esta verificación, el commit `e2df175`
+> ("fix: stop the window-mutation thread from blocking the hook pump",
+> `.superpowers/sdd/2026-09-01-monselect-f1/hang-fix-report.md`) separó
+> `WindowWatcher` en dos hilos —uno sólo bombea el hook, otro ejecuta todo el
+> placement— y ese trabajo se registró como el defecto 1 resuelto. **No lo
+> estaba.** El fix movió la llamada bloqueante de hilo (del hook al de
+> colocación) pero no la acotó: como el motor entero —matching, placement,
+> retries y las escrituras a `ApplyLog`, incluidos los `NoMatch`— corre en ese
+> único hilo de colocación, una sola `SetWindowPos`/`SetWindowPlacement` contra
+> una ventana ajena ocupada seguía bloqueando todo lo que venía detrás en la
+> cola, sin límite y sin ninguna señal — exactamente el síntoma de acá abajo,
+> reproducido de nuevo en la sesión real del usuario a los cuatro minutos de
+> uso normal (Chrome abierto), con el log parado en la misma línea durante más
+> de diez minutos mientras el proceso seguía "Responding: True". La corrección
+> real —acotar con timeout cada llamada mutante contra Win32, no sólo
+> cambiarla de hilo— está en
+> `.superpowers/sdd/2026-09-01-monselect-f1/hang-fix-2-report.md` y en
+> `BoundedWindowSystem` (`src/MonSelect.Core/Windows/BoundedWindowSystem.cs`).
+> El resto de esta sección se deja tal cual se escribió originalmente, como
+> evidencia histórica del síntoma — sigue siendo una descripción correcta del
+> comportamiento observado, sólo que la causa raíz completa y el fix
+> verdadero son los del reporte nuevo, no los de `hang-fix-report.md`.
+
 Durante las pruebas 2–3, el proceso `MonSelect.App.exe` **dejó de procesar
 eventos de ventana sin morir ni lanzar ninguna excepción visible**, dos veces,
 después de un puñado de operaciones exitosas:

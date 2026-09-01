@@ -9,8 +9,18 @@ namespace MonSelect.App;
 /// <summary>Arma el grafo de objetos y mantiene la config sincronizada con el disco.</summary>
 public sealed class Bootstrap : IDisposable
 {
+    /// <summary>
+    /// Presupuesto por llamada mutante contra una ventana ajena (SetStyle,
+    /// ApplyFrameChange, SetPlacement, Show). Más que de sobra para una app
+    /// legítimamente ocupada: reposicionar, incluso cuando la app pelea y se
+    /// vuelve a mover sola después, vuelve en milisegundos de un solo dígito.
+    /// Ver BoundedWindowSystem para por qué hace falta acotar esto en vez de
+    /// dejarlo síncrono sin límite (hang-fix-2-report.md).
+    /// </summary>
+    private static readonly TimeSpan WindowCallBudget = TimeSpan.FromSeconds(1);
+
     private readonly Win32MonitorSystem _monitorSystem = new();
-    private readonly Win32WindowSystem _windowSystem = new();
+    private readonly IWindowSystem _windowSystem = new BoundedWindowSystem(new Win32WindowSystem(), WindowCallBudget);
     private readonly WindowWatcher _watcher = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly ApplyLogFile _file = new();
