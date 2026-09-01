@@ -1,8 +1,32 @@
 using System.Diagnostics;
 using MonSelect.Core.Engine;
 using MonSelect.Core.Monitors;
+using MonSelect.Core.Rules;
 using MonSelect.Core.Win32;
 using MonSelect.Core.Windows;
+
+if (args.Contains("--check-rules"))
+{
+    var path = args.SkipWhile(a => a != "--check-rules").Skip(1).FirstOrDefault();
+    if (path is null)
+    {
+        Console.WriteLine("Uso: --check-rules <path a rules.yaml>");
+        return;
+    }
+
+    try
+    {
+        var set = YamlStore.Parse(File.ReadAllText(path));
+        Console.WriteLine($"OK: {set.Monitors.Count} monitor(es), {set.Rules.Count} regla(s).");
+        foreach (var rule in set.Rules)
+            Console.WriteLine($"  - {rule.Name}: state={rule.Place.State} rect={rule.Place.Rect} bleed={(rule.Bleed?.ToString() ?? "auto")}");
+    }
+    catch (RuleSetFormatException ex)
+    {
+        Console.WriteLine($"INVÁLIDO: {ex.Message}");
+    }
+    return;
+}
 
 if (args.Contains("--placement"))
 {
@@ -41,6 +65,60 @@ if (args.Contains("--windows"))
     Console.WriteLine($"title    : {info.Title}");
     Console.WriteLine($"bounds   : {info.Bounds}");
     Console.WriteLine($"state    : {info.CurrentState}");
+    return;
+}
+
+if (args.Contains("--measure-bleed"))
+{
+    // F2: medición read-only del borde que la propia app dibuja adentro de su
+    // rect visible. No mueve, activa ni toca ninguna ventana — sólo enumera y
+    // lee rects, para poder correr esto contra apps reales del usuario sin
+    // riesgo (WhatsApp, Discord, Chrome ya abiertos en su escritorio).
+    var system = new Win32WindowSystem();
+    var found = 0;
+    NativeMethods.EnumWindows((hwnd, _) =>
+    {
+        if (!NativeMethods.IsWindowVisible(hwnd) || NativeMethods.GetWindowTextLengthW(hwnd) == 0)
+            return true;
+
+        var buffer = new char[256];
+        var len = NativeMethods.GetClassNameW(hwnd, buffer, buffer.Length);
+        var className = len > 0 ? new string(buffer, 0, len) : "";
+
+        var titleLen = NativeMethods.GetWindowTextLengthW(hwnd);
+        var titleBuf = new char[titleLen + 1];
+        var titleWritten = NativeMethods.GetWindowTextW(hwnd, titleBuf, titleBuf.Length);
+        var title = titleWritten > 0 ? new string(titleBuf, 0, titleWritten) : "";
+
+        NativeMethods.GetWindowThreadProcessId(hwnd, out var pid);
+        string procName;
+        try { procName = Process.GetProcessById((int)pid).ProcessName; }
+        catch { procName = "?"; }
+
+        var wanted = args.SkipWhile(a => a != "--measure-bleed").Skip(1).FirstOrDefault();
+        if (wanted is not null
+            && !procName.Contains(wanted, StringComparison.OrdinalIgnoreCase)
+            && !className.Contains(wanted, StringComparison.OrdinalIgnoreCase)
+            && !title.Contains(wanted, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var outer = system.GetBounds(hwnd);
+        var visible = system.GetVisibleBounds(hwnd);
+        var inset = system.MeasureContentInset(hwnd);
+
+        Console.WriteLine($"proceso  : {procName} (hwnd 0x{hwnd:X})");
+        Console.WriteLine($"clase    : {className}");
+        Console.WriteLine($"título   : {title}");
+        Console.WriteLine($"outer    : {outer}");
+        Console.WriteLine($"visible  : {visible}");
+        Console.WriteLine($"bleed    : {inset}px");
+        Console.WriteLine();
+        found++;
+        return true;
+    }, 0);
+
+    if (found == 0)
+        Console.WriteLine("No se encontró ninguna ventana visible que matchee.");
     return;
 }
 
