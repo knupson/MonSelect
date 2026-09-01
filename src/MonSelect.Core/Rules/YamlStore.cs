@@ -82,6 +82,18 @@ public static class YamlStore
         File.WriteAllText(path, writer.ToString());
     }
 
+    /// <summary>
+    /// Renderiza una sola regla exactamente como <see cref="Save"/> la escribiría.
+    /// Lo usa la GUI para mostrar la vista previa de "Crear regla desde esta
+    /// ventana" antes de tocar el archivo.
+    /// </summary>
+    public static string RenderRule(Rule rule)
+    {
+        var writer = new StringWriter();
+        WriteRule(writer, rule);
+        return writer.ToString();
+    }
+
     private static void WriteRule(TextWriter writer, Rule rule)
     {
         writer.WriteLine($"  - name: {Quote(rule.Name)}");

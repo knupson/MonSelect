@@ -283,6 +283,53 @@ public class RuleEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task ApplyRuleAsync_places_only_windows_matching_that_specific_rule()
+    {
+        _windows.Add(1, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);
+        _windows.Add(2, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);
+        _windows.SetObservedBounds(1, FakeMonitorSystem.Right.WorkArea);
+
+        var described = new Dictionary<nint, WindowInfo>
+        {
+            [1] = Describe(1),
+            [2] = Describe(2) with { ExePath = @"C:\Windows\notepad.exe" },
+        };
+        var rule = MakeRule("rustdesk");
+        var (engine, log) = Build(SetWith(rule), described);
+
+        var applied = await engine.ApplyRuleAsync(rule, new nint[] { 1, 2 }, CancellationToken.None);
+
+        Assert.Equal(1, applied);
+        Assert.Contains(log.Recent(), e => e.Handle == 1 && e.Result == ApplyResult.Applied);
+        Assert.DoesNotContain(log.Recent(), e => e.Handle == 2);
+    }
+
+    [Fact]
+    public async Task ApplyRuleAsync_ignores_the_rules_priority_and_the_already_placed_gate()
+    {
+        // Otra regla anterior en el archivo también matchea; ApplyRuleAsync tiene
+        // que aplicar la regla pedida igual, no la que ganaría por first-match.
+        _windows.Add(1, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);
+        _windows.SetObservedBounds(1, FakeMonitorSystem.Vertical.WorkArea);
+
+        var earlier = MakeRule("primero-en-el-archivo", monitors: new[] { "benq" });
+        var target = MakeRule("la-que-quiero-probar", monitors: new[] { "vertical" });
+        var described = new Dictionary<nint, WindowInfo> { [1] = Describe(1) };
+        var (engine, log) = Build(SetWith(earlier, target), described);
+
+        // Ya se colocó una vez por el camino normal (con la regla anterior)...
+        _windows.SetObservedBounds(1, FakeMonitorSystem.Right.WorkArea);
+        await engine.HandleAsync(1, CancellationToken.None);
+        _windows.SetObservedBounds(1, FakeMonitorSystem.Vertical.WorkArea);
+
+        // ...pero pedir explícitamente la otra regla la aplica igual.
+        var applied = await engine.ApplyRuleAsync(target, new nint[] { 1 }, CancellationToken.None);
+
+        Assert.Equal(1, applied);
+        Assert.Contains(log.Recent(), e => e.RuleName == "la-que-quiero-probar" && e.Result == ApplyResult.Applied);
+    }
+
+    [Fact]
     public void The_log_keeps_only_the_most_recent_entries()
     {
         var log = new ApplyLog(capacity: 3);

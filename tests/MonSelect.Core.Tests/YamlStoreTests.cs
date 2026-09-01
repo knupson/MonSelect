@@ -189,6 +189,29 @@ public class YamlStoreTests
     }
 
     [Fact]
+    public void RenderRule_produces_the_same_block_that_Save_would_write_for_that_rule()
+    {
+        var set = YamlStore.Parse(FullDocument);
+        var rule = set.Rules[0];
+
+        var rendered = YamlStore.RenderRule(rule);
+
+        var dir = Directory.CreateTempSubdirectory("monselect-tests");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "rules.yaml");
+            YamlStore.Save(path, set with { Rules = new[] { rule } });
+            var fullText = File.ReadAllText(path);
+
+            Assert.Contains(rendered.TrimEnd(), fullText);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void An_empty_document_yields_an_empty_rule_set()
     {
         var set = YamlStore.Parse("version: 1\n");
