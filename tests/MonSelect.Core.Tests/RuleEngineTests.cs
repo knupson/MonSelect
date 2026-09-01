@@ -23,12 +23,17 @@ public class RuleEngineTests : IDisposable
     }
 
     /// <summary>Probe de mentira: devuelve el WindowInfo que el test decida.</summary>
-    private sealed class StubProbe(Dictionary<nint, WindowInfo> windows) : IWindowDescriber
+    private sealed class StubProbe(Dictionary<nint, WindowInfo> windows, int contentInset = 0) : IWindowDescriber
     {
         public WindowInfo? Describe(nint handle)
             => windows.TryGetValue(handle, out var info) ? info : null;
 
         public long StartTicksOf(uint pid) => 1;
+
+        // 0 por default, en vez de leer el fake de FakeWindowSystem: preserva
+        // el comportamiento de los tests existentes, que no configuran bleed y
+        // esperan el rect exacto que ya calculaban antes de F2.
+        public int MeasureContentInset(nint handle) => contentInset;
     }
 
     private static RuleSet SetWith(params Rule[] rules) => new(
@@ -244,6 +249,8 @@ public class RuleEngineTests : IDisposable
         public WindowInfo? Describe(nint handle) => throw new InvalidOperationException("boom");
 
         public long StartTicksOf(uint pid) => 1;
+
+        public int MeasureContentInset(nint handle) => 0;
     }
 
     [Fact]
@@ -327,6 +334,80 @@ public class RuleEngineTests : IDisposable
 
         Assert.Equal(1, applied);
         Assert.Contains(log.Recent(), e => e.RuleName == "la-que-quiero-probar" && e.Result == ApplyResult.Applied);
+    }
+
+    // --- F2: bleed. "auto" (Rule.Bleed == null) pide la medición a la probe y
+    // expande el rect pedido por ese tanto; un valor explícito la pisa.
+
+    private static Rule NormalRule(string name, Rect rect, int? bleed, string monitor = "benq")
+        => new(name, new MatchCriteria(Exe: Exe),
+               new RulePlacement(new[] { monitor }, WindowState.Normal, rect),
+               true, ApplyMode.All, IfMissing.Skip, new[] { 0 }, bleed);
+
+    [Fact]
+    public async Task Auto_bleed_asks_the_probe_and_expands_the_placed_rect()
+    {
+        _windows.Add(1, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);
+        var rect = Rect.FromLtrb(1920, -842, 3000, 102);
+        var rule = NormalRule("con-bleed", rect, bleed: null);
+
+        var styles = new StyleStore(Path.Combine(_dir.FullName, "borderless-auto.json"));
+        var log = new ApplyLog();
+        var engine = new RuleEngine(
+            new StubProbe(new Dictionary<nint, WindowInfo> { [1] = Describe(1) }, contentInset: 1),
+            new MonitorRegistry(_monitors),
+            new WindowPlacer(_windows, styles),
+            new RetryScheduler(_windows, new NoDelay()),
+            log);
+        engine.UpdateRules(SetWith(rule));
+
+        await engine.HandleAsync(1, CancellationToken.None);
+
+        Assert.Equal(Rect.FromLtrb(1919, -843, 3001, 103), _windows[1].NormalPosition);
+    }
+
+    [Fact]
+    public async Task An_explicit_bleed_of_zero_never_expands_even_if_the_probe_would_measure_more()
+    {
+        _windows.Add(1, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);
+        var rect = Rect.FromLtrb(1920, -842, 3000, 102);
+        var rule = NormalRule("sin-bleed", rect, bleed: 0);
+
+        var styles = new StyleStore(Path.Combine(_dir.FullName, "borderless-zero.json"));
+        var log = new ApplyLog();
+        var engine = new RuleEngine(
+            new StubProbe(new Dictionary<nint, WindowInfo> { [1] = Describe(1) }, contentInset: 5),
+            new MonitorRegistry(_monitors),
+            new WindowPlacer(_windows, styles),
+            new RetryScheduler(_windows, new NoDelay()),
+            log);
+        engine.UpdateRules(SetWith(rule));
+
+        await engine.HandleAsync(1, CancellationToken.None);
+
+        Assert.Equal(rect, _windows[1].NormalPosition);
+    }
+
+    [Fact]
+    public async Task An_explicit_bleed_overrides_the_probes_measurement()
+    {
+        _windows.Add(1, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);
+        var rect = Rect.FromLtrb(1920, -842, 3000, 102);
+        var rule = NormalRule("bleed-fijo", rect, bleed: 3);
+
+        var styles = new StyleStore(Path.Combine(_dir.FullName, "borderless-fixed.json"));
+        var log = new ApplyLog();
+        var engine = new RuleEngine(
+            new StubProbe(new Dictionary<nint, WindowInfo> { [1] = Describe(1) }, contentInset: 1),
+            new MonitorRegistry(_monitors),
+            new WindowPlacer(_windows, styles),
+            new RetryScheduler(_windows, new NoDelay()),
+            log);
+        engine.UpdateRules(SetWith(rule));
+
+        await engine.HandleAsync(1, CancellationToken.None);
+
+        Assert.Equal(Rect.FromLtrb(1917, -845, 3003, 105), _windows[1].NormalPosition);
     }
 
     [Fact]

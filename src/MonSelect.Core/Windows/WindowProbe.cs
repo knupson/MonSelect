@@ -7,6 +7,9 @@ public interface IWindowDescriber
 {
     WindowInfo? Describe(nint handle);
     long StartTicksOf(uint pid);
+
+    /// <summary>Ver <see cref="IWindowSystem.MeasureContentInset"/>.</summary>
+    int MeasureContentInset(nint handle);
 }
 
 /// <summary>
@@ -42,6 +45,8 @@ public sealed class WindowProbe(IWindowSystem system) : IWindowDescriber
     }
 
     public long StartTicksOf(uint pid) => ProcessFacts(pid).StartTicks;
+
+    public int MeasureContentInset(nint handle) => system.MeasureContentInset(handle);
 
     private (string? Exe, string? CommandLine, long StartTicks) ProcessFacts(uint pid)
     {

@@ -54,6 +54,18 @@ public static class YamlStore
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
+        File.WriteAllText(path, Render(set));
+    }
+
+    /// <summary>
+    /// Renderiza el documento entero como <see cref="Save"/> lo escribiría, sin
+    /// tocar el disco. Lo usa <see cref="RuleValidation"/> para validar una
+    /// regla en edición reusando exactamente las reglas de formato que
+    /// <see cref="Parse"/> ya conoce (rotate con menos de dos monitores, rect
+    /// invertido, estado desconocido) en vez de duplicarlas.
+    /// </summary>
+    public static string Render(RuleSet set)
+    {
         var writer = new StringWriter();
         writer.WriteLine($"version: {set.Version}");
 
@@ -79,7 +91,7 @@ public static class YamlStore
         foreach (var rule in set.Rules)
             WriteRule(writer, rule);
 
-        File.WriteAllText(path, writer.ToString());
+        return writer.ToString();
     }
 
     /// <summary>
@@ -121,6 +133,9 @@ public static class YamlStore
             writer.WriteLine($"    if_missing: {rule.IfMissing.ToString().ToLowerInvariant()}");
         if (rule.RetryMs is { } retry)
             writer.WriteLine($"    retry_ms: [{string.Join(", ", retry)}]");
+        // null = auto: se omite, igual que los demás campos en su default.
+        if (rule.Bleed is { } bleed)
+            writer.WriteLine($"    bleed: {bleed}");
     }
 
     private static void WriteOptional(TextWriter writer, string key, string? value)
@@ -252,12 +267,13 @@ public static class YamlStore
                 ? ParseEnum<IfMissing>(rawIfMissing, "if_missing")
                 : defaultIfMissing;
             var retry = ReadIntList(entry, "retry_ms") ?? defaultRetry;
+            var bleed = ReadBleed(entry, name);
 
             if (apply == ApplyMode.Rotate && place.MonitorAliases.Count < 2)
                 throw new RuleSetFormatException(
                     $"La regla '{name}' usa apply: rotate pero place.monitor no es una lista de dos o más alias.");
 
-            rules.Add(new Rule(name, match, place, enabled, apply, ifMissing, retry));
+            rules.Add(new Rule(name, match, place, enabled, apply, ifMissing, retry, bleed));
         }
 
         return rules;
@@ -295,7 +311,29 @@ public static class YamlStore
         if (values.Length != 4)
             throw new RuleSetFormatException("rect tiene que tener exactamente cuatro enteros: [left, top, right, bottom].");
 
+        if (values[2] <= values[0] || values[3] <= values[1])
+            throw new RuleSetFormatException(
+                $"rect [{values[0]}, {values[1]}, {values[2]}, {values[3]}] no es válido: " +
+                "right tiene que ser mayor que left y bottom mayor que top.");
+
         return Rect.FromLtrb(values[0], values[1], values[2], values[3]);
+    }
+
+    /// <summary>
+    /// "auto" (o ausente) es null: medir el borde en el momento de aplicar.
+    /// Cualquier otro valor, incluido 0, es un número explícito de píxeles que
+    /// pisa la medición.
+    /// </summary>
+    private static int? ReadBleed(YamlMappingNode entry, string ruleName)
+    {
+        var raw = ReadScalarString(entry, "bleed");
+        if (raw is null || string.Equals(raw, "auto", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return int.TryParse(raw, out var value)
+            ? value
+            : throw new RuleSetFormatException(
+                $"La regla '{ruleName}' tiene un bleed inválido: '{raw}'. Tiene que ser 'auto' o un número de píxeles.");
     }
 
     private static IReadOnlyList<int>? ReadIntList(YamlMappingNode node, string key)

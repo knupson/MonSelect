@@ -111,6 +111,51 @@ public class WindowPlacerTests : IDisposable
         Assert.Equal(ShowCommand.Minimized, _system[Hwnd].ShowCmd);
     }
 
+    // --- F2: compensación del borde que la propia app dibuja adentro de su
+    // rect visible (bleed). Expande el rect PEDIDO antes de la conversión al
+    // rect externo de DWM: son dos correcciones distintas que se componen.
+
+    [Fact]
+    public void Bleed_expands_the_wanted_rect_on_all_four_sides_before_the_DWM_conversion()
+    {
+        // Sin marco DWM (FrameInset = 0 por default): el bleed es la única
+        // corrección en juego, así que el rect pedido a Windows tiene que
+        // salir exactamente expandido por el bleed en las cuatro puntas.
+        var target = Target(ShowCommand.Normal, strip: false, normal: Rect.FromLtrb(1920, -842, 3000, 102));
+
+        _placer.Apply(Hwnd, 1, 1, target, bleed: 1);
+
+        Assert.Equal(Rect.FromLtrb(1919, -843, 3001, 103), _system[Hwnd].NormalPosition);
+    }
+
+    [Fact]
+    public void Zero_bleed_leaves_the_wanted_rect_untouched()
+    {
+        var target = Target(ShowCommand.Normal, strip: false, normal: Rect.FromLtrb(1920, -842, 3000, 102));
+
+        _placer.Apply(Hwnd, 1, 1, target, bleed: 0);
+
+        Assert.Equal(Rect.FromLtrb(1920, -842, 3000, 102), _system[Hwnd].NormalPosition);
+    }
+
+    [Fact]
+    public void Bleed_and_the_DWM_frame_conversion_compose_instead_of_one_overriding_the_other()
+    {
+        // El marco invisible de DWM se mide contra los bounds ACTUALES de la
+        // ventana (antes de moverla) — no cambia por el bleed, que sólo toca
+        // el rect pedido. Con 7px de marco a los lados y abajo (como en Win11
+        // real) y 1px de bleed, el rect final tiene que reflejar los dos.
+        _system[Hwnd].FrameInset = 7;
+        var target = Target(ShowCommand.Normal, strip: false, normal: Rect.FromLtrb(1920, -842, 3000, 102));
+
+        _placer.Apply(Hwnd, 1, 1, target, bleed: 1);
+
+        // Rect pedido expandido por bleed: (1919,-843)-(3001,103).
+        // GetBounds/GetVisibleBounds de Hwnd (100,100)-(900,700) con
+        // FrameInset 7 dan un offset de 7px a izquierda/derecha/abajo, 0 arriba.
+        Assert.Equal(Rect.FromLtrb(1912, -843, 3008, 110), _system[Hwnd].NormalPosition);
+    }
+
     [Fact]
     public void Applying_to_a_dead_handle_does_nothing_instead_of_throwing()
     {

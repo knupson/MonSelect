@@ -217,11 +217,17 @@ public sealed class RuleEngine(
 
         var startTicks = probe.StartTicksOf(info.ProcessId);
 
+        // Bleed explícito (incluido 0, "nunca compensar") pisa la medición;
+        // "auto" (null) mide contra la ventana real una sola vez, antes del
+        // primer intento — la medición no cambia entre reintentos porque el
+        // borde que dibuja la app es parte de su chrome, no de su contenido.
+        var bleed = rule.Bleed ?? probe.MeasureContentInset(info.Handle);
+
         var outcome = await retries.RunAsync(
             info.Handle,
             rule.EffectiveRetryMs,
             target.ExpectedBounds,
-            () => placer.Apply(info.Handle, info.ProcessId, startTicks, target),
+            () => placer.Apply(info.Handle, info.ProcessId, startTicks, target, bleed),
             ct,
             rule.Place.State,
             monitor.Bounds).ConfigureAwait(false);

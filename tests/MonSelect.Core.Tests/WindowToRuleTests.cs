@@ -110,6 +110,47 @@ public class WindowToRuleTests
         Assert.Equal("RustDesk EJEMPLO-01", rule.Name);
     }
 
+    // --- F2/F3: la captura guiada tiene que reproducir exactamente los mismos
+    // píxeles al aplicar la regla. El rect que se guarda es el visible
+    // CAPTURADO encogido por el bleed medido (WindowPlacer.ExpandForBleed lo
+    // vuelve a expandir al aplicar), y el bleed se graba explícito — no
+    // "auto" — para no depender de una remedición futura.
+
+    [Fact]
+    public void A_captured_rect_is_shrunk_by_the_measured_bleed()
+    {
+        var captured = Rect.FromLtrb(1919, -843, 3001, 103); // lo que se ve, borde incluido
+
+        var rule = WindowToRule.Convert(
+            MakeWindow(), captured, "benq", "n",
+            includeCommandLine: false, includeTitle: false, bleed: 1);
+
+        Assert.Equal(Rect.FromLtrb(1920, -842, 3000, 102), rule.Place.Rect);
+    }
+
+    [Fact]
+    public void The_measured_bleed_is_recorded_explicitly_on_the_rule_not_as_auto()
+    {
+        var rule = WindowToRule.Convert(
+            MakeWindow(), Rect.FromLtrb(3000, 0, 4920, 1080), "benq", "n",
+            includeCommandLine: false, includeTitle: false, bleed: 2);
+
+        Assert.Equal(2, rule.Bleed);
+    }
+
+    [Fact]
+    public void Zero_bleed_leaves_the_captured_rect_untouched()
+    {
+        var captured = Rect.FromLtrb(3000, 0, 4920, 1080);
+
+        var rule = WindowToRule.Convert(
+            MakeWindow(), captured, "benq", "n",
+            includeCommandLine: false, includeTitle: false, bleed: 0);
+
+        Assert.Equal(captured, rule.Place.Rect);
+        Assert.Equal(0, rule.Bleed);
+    }
+
     [Fact]
     public void An_unresolved_monitor_alias_throws_instead_of_writing_a_broken_rule()
     {

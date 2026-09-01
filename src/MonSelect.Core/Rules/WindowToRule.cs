@@ -26,6 +26,15 @@ public static class WindowToRule
     /// Regex a usar cuando <paramref name="includeTitle"/> es true. Si es null se
     /// deriva del título literal de la ventana, anclado para no matchear de más.
     /// </param>
+    /// <param name="bleed">
+    /// Borde propio de la app (F2), medido con <c>IWindowSystem.MeasureContentInset</c>
+    /// contra la ventana capturada. <paramref name="visibleBounds"/> es lo que
+    /// se ve AHORA, borde incluido; para que aplicar la regla reproduzca esos
+    /// mismos píxeles, el rect que se guarda se encoge por este tanto (lo que
+    /// <see cref="Windows.WindowPlacer"/> vuelve a expandir al aplicar) y el
+    /// valor medido se graba explícito en la regla — no "auto" — para que una
+    /// remedición futura contra otra instancia de la ventana no lo corra.
+    /// </param>
     public static Rule Convert(
         WindowInfo window,
         Rect visibleBounds,
@@ -33,7 +42,8 @@ public static class WindowToRule
         string ruleName,
         bool includeCommandLine,
         bool includeTitle,
-        string? titleRegex = null)
+        string? titleRegex = null,
+        int bleed = 0)
     {
         if (string.IsNullOrWhiteSpace(monitorAlias))
             throw new ArgumentException(
@@ -47,11 +57,18 @@ public static class WindowToRule
             Title: includeTitle ? (titleRegex ?? DefaultTitleRegex(window.Title)) : null,
             Aumid: null);
 
-        Rect? rect = window.CurrentState == WindowState.Normal ? visibleBounds : null;
+        Rect? rect = window.CurrentState == WindowState.Normal ? Shrink(visibleBounds, bleed) : null;
         var place = new RulePlacement(new[] { monitorAlias }, window.CurrentState, rect);
 
-        return new Rule(ruleName, match, place);
+        return new Rule(ruleName, match, place, Bleed: bleed);
     }
+
+    /// <summary>Inverso de <see cref="Windows.WindowPlacer.ExpandForBleed"/>.</summary>
+    private static Rect Shrink(Rect rect, int bleed)
+        => bleed == 0
+            ? rect
+            : Rect.FromLtrb(
+                rect.Left + bleed, rect.Top + bleed, rect.Right - bleed, rect.Bottom - bleed);
 
     /// <summary>Título literal escapado y anclado, para que no matchee de más por accidente.</summary>
     public static string DefaultTitleRegex(string title)

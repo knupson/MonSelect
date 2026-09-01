@@ -211,6 +211,153 @@ public class YamlStoreTests
         }
     }
 
+    // --- F2: bleed. "auto" (o ausente) es null; cualquier otro valor,
+    // incluido 0, es un número explícito de píxeles que pisa la medición.
+
+    [Fact]
+    public void A_rule_without_bleed_defaults_to_auto()
+    {
+        var rule = YamlStore.Parse(FullDocument).Rules[0];
+
+        Assert.Null(rule.Bleed);
+    }
+
+    [Fact]
+    public void Bleed_auto_is_the_same_as_omitting_it()
+    {
+        var set = YamlStore.Parse("""
+            version: 1
+            rules:
+              - name: n
+                place:
+                  monitor: x
+                  state: maximized
+                bleed: auto
+            """);
+
+        Assert.Null(set.Rules[0].Bleed);
+    }
+
+    [Fact]
+    public void Bleed_zero_is_an_explicit_override_not_auto()
+    {
+        var set = YamlStore.Parse("""
+            version: 1
+            rules:
+              - name: n
+                place:
+                  monitor: x
+                  state: maximized
+                bleed: 0
+            """);
+
+        Assert.Equal(0, set.Rules[0].Bleed);
+    }
+
+    [Fact]
+    public void An_explicit_bleed_value_is_parsed()
+    {
+        var set = YamlStore.Parse("""
+            version: 1
+            rules:
+              - name: n
+                place:
+                  monitor: x
+                  state: maximized
+                bleed: 2
+            """);
+
+        Assert.Equal(2, set.Rules[0].Bleed);
+    }
+
+    [Fact]
+    public void An_invalid_bleed_value_names_the_offending_rule_and_value()
+    {
+        var ex = Assert.Throws<RuleSetFormatException>(() => YamlStore.Parse("""
+            version: 1
+            rules:
+              - name: mal bleed
+                place:
+                  monitor: x
+                  state: maximized
+                bleed: mucho
+            """));
+
+        Assert.Contains("mal bleed", ex.Message);
+        Assert.Contains("mucho", ex.Message);
+    }
+
+    [Fact]
+    public void Bleed_round_trips_through_save_and_load()
+    {
+        var set = YamlStore.Parse("""
+            version: 1
+            rules:
+              - name: n
+                place:
+                  monitor: x
+                  state: maximized
+                bleed: 3
+            """);
+        var dir = Directory.CreateTempSubdirectory("monselect-tests");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "rules.yaml");
+            YamlStore.Save(path, set);
+            var reloaded = YamlStore.Load(path);
+
+            Assert.Equal(3, reloaded.Rules[0].Bleed);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Auto_bleed_is_not_written_to_the_file_at_all()
+    {
+        var rule = YamlStore.Parse(FullDocument).Rules[0]; // Bleed == null (auto)
+
+        var rendered = YamlStore.RenderRule(rule);
+
+        Assert.DoesNotContain("bleed", rendered);
+    }
+
+    // --- Validación: rect con el borde derecho o inferior antes que el
+    // izquierdo o superior. F1 acceptance: "un rect cuyo right está a la
+    // izquierda de su left".
+
+    [Fact]
+    public void A_rect_with_right_before_left_is_rejected()
+    {
+        var ex = Assert.Throws<RuleSetFormatException>(() => YamlStore.Parse("""
+            version: 1
+            rules:
+              - name: rect invertido
+                place:
+                  monitor: x
+                  state: normal
+                  rect: [100, 0, 50, 200]
+            """));
+
+        Assert.Contains("100", ex.Message);
+    }
+
+    [Fact]
+    public void A_rect_with_bottom_before_top_is_rejected()
+    {
+        Assert.Throws<RuleSetFormatException>(() => YamlStore.Parse("""
+            version: 1
+            rules:
+              - name: rect invertido
+                place:
+                  monitor: x
+                  state: normal
+                  rect: [0, 200, 100, 50]
+            """));
+    }
+
     [Fact]
     public void An_empty_document_yields_an_empty_rule_set()
     {
@@ -236,6 +383,7 @@ public class YamlStoreTests
         Assert.Equal(expected.Apply, actual.Apply);
         Assert.Equal(expected.IfMissing, actual.IfMissing);
         Assert.Equal(expected.RetryMs, actual.RetryMs);
+        Assert.Equal(expected.Bleed, actual.Bleed);
         Assert.Equal(expected.Match, actual.Match);
         Assert.Equal(expected.Place.State, actual.Place.State);
         Assert.Equal(expected.Place.Rect, actual.Place.Rect);

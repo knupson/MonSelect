@@ -78,6 +78,7 @@ public sealed class BoundedWindowSystem : IWindowSystem
     public Rect GetVisibleBounds(nint handle) => _inner.GetVisibleBounds(handle);
     public void SetSquareCorners(nint handle) => _inner.SetSquareCorners(handle);
     public uint GetStyle(nint handle) => _inner.GetStyle(handle);
+    public int MeasureContentInset(nint handle) => _inner.MeasureContentInset(handle);
 
     public void SetStyle(nint handle, uint style)
         => RunBounded(handle, nameof(SetStyle), () => _inner.SetStyle(handle, style));

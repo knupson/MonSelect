@@ -28,6 +28,9 @@ public sealed class FakeWindowSystem : IWindowSystem
 
         /// <summary>Cuántos intentos resiste antes de rendirse.</summary>
         public int FightsForAttempts { get; set; }
+
+        /// <summary>Lo que MeasureContentInset debería devolver para esta ventana en el test.</summary>
+        public int ContentInset { get; set; }
     }
 
     private readonly Dictionary<nint, Window> _windows = new();
@@ -102,6 +105,8 @@ public sealed class FakeWindowSystem : IWindowSystem
         Calls.Add($"Show({handle},{showCmd})");
         _windows[handle].ShowCmd = showCmd;
     }
+
+    public int MeasureContentInset(nint handle) => _windows[handle].ContentInset;
 
     /// <summary>Deja que la ventana se rebele, si el test la configuró para eso.</summary>
     private static void Settle(Window w)

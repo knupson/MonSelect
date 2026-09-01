@@ -99,6 +99,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(nint hwnd, out uint pid);
 
+    internal const uint GW_CHILD = 5;
+    internal const uint GW_HWNDNEXT = 2;
+
+    [DllImport("user32.dll")]
+    internal static extern nint GetWindow(nint hwnd, uint cmd);
+
     internal const uint EVENT_OBJECT_SHOW = 0x8002;
     internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
     internal const uint WINEVENT_OUTOFCONTEXT = 0x0000;

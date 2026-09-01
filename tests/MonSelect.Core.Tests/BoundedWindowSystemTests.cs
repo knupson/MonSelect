@@ -46,6 +46,7 @@ public class BoundedWindowSystemTests
         }
 
         public void Show(nint handle, ShowCommand showCmd) { }
+        public int MeasureContentInset(nint handle) => 0;
     }
 
     [Fact]

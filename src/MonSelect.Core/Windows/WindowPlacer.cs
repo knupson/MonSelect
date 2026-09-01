@@ -8,7 +8,16 @@ namespace MonSelect.Core.Windows;
 /// </summary>
 public sealed class WindowPlacer(IWindowSystem system, StyleStore styles)
 {
-    public void Apply(nint handle, uint processId, long processStartTicks, TargetPlacement target)
+    /// <param name="bleed">
+    /// Píxeles que la propia app se come de su rect visible dibujando su
+    /// propio borde (F2). Se expande el rect pedido por este tanto en las
+    /// cuatro puntas antes de la conversión a rect externo — son dos
+    /// correcciones distintas que se componen, no una sola: ésta arregla lo
+    /// que la app le hace a su contenido; <see cref="ToOuterRect"/> arregla lo
+    /// que DWM le agrega a la ventana entera.
+    /// </param>
+    public void Apply(
+        nint handle, uint processId, long processStartTicks, TargetPlacement target, int bleed = 0)
     {
         if (!system.IsWindow(handle))
             return;
@@ -24,8 +33,21 @@ public sealed class WindowPlacer(IWindowSystem system, StyleStore styles)
         if (target.ShowCmd == ShowCommand.Normal)
             system.SetSquareCorners(handle);
 
-        system.SetPlacement(handle, target.ShowCmd, ToOuterRect(handle, target.NormalPosition));
+        var wanted = ExpandForBleed(target.NormalPosition, bleed);
+        system.SetPlacement(handle, target.ShowCmd, ToOuterRect(handle, wanted));
     }
+
+    /// <summary>
+    /// Expande el rect pedido por <paramref name="bleed"/> píxeles a cada
+    /// lado: si la app se come 1px de borde propio en las cuatro puntas, hay
+    /// que pedirle a Windows 1px más de lo escrito en la regla para que el
+    /// contenido termine exactamente donde la regla dice.
+    /// </summary>
+    internal static Rect ExpandForBleed(Rect rect, int bleed)
+        => bleed == 0
+            ? rect
+            : Rect.FromLtrb(
+                rect.Left - bleed, rect.Top - bleed, rect.Right + bleed, rect.Bottom + bleed);
 
     /// <summary>Devuelve false si la ventana nunca fue convertida a borderless.</summary>
     public bool Revert(nint handle)

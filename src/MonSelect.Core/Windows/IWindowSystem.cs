@@ -37,4 +37,18 @@ public interface IWindowSystem
     void SetPlacement(nint handle, ShowCommand showCmd, Rect normalPosition);
 
     void Show(nint handle, ShowCommand showCmd);
+
+    /// <summary>
+    /// Mide el borde que la propia app dibuja adentro de su rect visible (F2):
+    /// algunas apps (WhatsApp, Discord, Chrome) alojan su contenido en la
+    /// ventana hija más grande, uno o dos px adentro del rect visible del
+    /// padre, así que su contenido se queda corto y deja ver una franja de
+    /// escritorio entre dos ventanas contiguas. Se mide comparando el rect en
+    /// pantalla de la ventana hija más grande contra <see cref="GetVisibleBounds"/>
+    /// del padre. Devuelve 0 cuando no hay hijos, cuando el hijo llena al
+    /// padre, o cuando los insets de izquierda, derecha y abajo no son
+    /// uniformes entre sí — un valor mal medido descoloca la ventana, así que
+    /// ante la duda se prefiere no compensar.
+    /// </summary>
+    int MeasureContentInset(nint handle);
 }

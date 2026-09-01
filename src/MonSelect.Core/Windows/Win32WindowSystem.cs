@@ -57,4 +57,56 @@ public sealed class Win32WindowSystem : IWindowSystem
 
     public void Show(nint handle, ShowCommand showCmd)
         => NativeMethods.ShowWindow(handle, (int)showCmd);
+
+    /// <summary>Insets aceptados como borde de verdad; más que esto es casi seguro otra cosa.</summary>
+    private const int MaxAcceptedInset = 4;
+
+    public int MeasureContentInset(nint handle)
+    {
+        var visible = GetVisibleBounds(handle);
+        if (visible.IsEmpty)
+            return 0;
+
+        var largest = LargestVisibleChild(handle);
+        if (largest is not { } child)
+            return 0;
+
+        var left = child.Left - visible.Left;
+        var right = visible.Right - child.Right;
+        var bottom = visible.Bottom - child.Bottom;
+
+        // El hijo llena al padre (o lo excede) en algún lado: no hay borde que
+        // compensar, o la medición no es de fiar.
+        if (left <= 0 || right <= 0 || bottom <= 0)
+            return 0;
+
+        if (left != right || left != bottom)
+            return 0;
+
+        return left <= MaxAcceptedInset ? left : 0;
+    }
+
+    private static Rect? LargestVisibleChild(nint handle)
+    {
+        Rect? largest = null;
+        long largestArea = 0;
+
+        var child = NativeMethods.GetWindow(handle, NativeMethods.GW_CHILD);
+        while (child != 0)
+        {
+            if (NativeMethods.IsWindowVisible(child) && NativeMethods.GetWindowRect(child, out var rect))
+            {
+                var area = (long)Math.Max(0, rect.Width) * Math.Max(0, rect.Height);
+                if (area > largestArea)
+                {
+                    largestArea = area;
+                    largest = rect;
+                }
+            }
+
+            child = NativeMethods.GetWindow(child, NativeMethods.GW_HWNDNEXT);
+        }
+
+        return largest;
+    }
 }
