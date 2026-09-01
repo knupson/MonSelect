@@ -105,6 +105,29 @@ public class RuleEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task A_maximized_window_is_applied_despite_the_DWM_invisible_resize_border()
+    {
+        // Defecto 2 (docs/superpowers/findings/f1-acceptance.md): en Windows 11,
+        // GetWindowRect de una ventana maximizada trae ~8px de borde invisible
+        // que DWM agrega alrededor del work area. Antes del fix, RetryScheduler
+        // comparaba el rect exacto y esto nunca coincidía: se agotaban los 4
+        // reintentos y quedaba "Resisted" pese a estar perfectamente maximizada.
+        _windows.Add(1, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);
+        var work = FakeMonitorSystem.Right.WorkArea;
+        var withDwmBorder = Rect.FromLtrb(work.Left - 8, work.Top - 8, work.Right + 8, work.Bottom + 8);
+        _windows.SetObservedBounds(1, withDwmBorder);
+
+        var (engine, log) = Build(
+            SetWith(MakeRule("rustdesk")), // default state: Maximized
+            new Dictionary<nint, WindowInfo> { [1] = Describe(1) });
+
+        var result = await engine.HandleAsync(1, CancellationToken.None);
+
+        Assert.Equal(ApplyResult.Applied, result);
+        Assert.Contains(log.Recent(), e => e.Result == ApplyResult.Applied && e.Attempts == 1);
+    }
+
+    [Fact]
     public async Task A_missing_monitor_with_skip_does_not_place_the_window()
     {
         _windows.Add(1, Rect.FromLtrb(100, 100, 900, 700), 0x00CF0000);

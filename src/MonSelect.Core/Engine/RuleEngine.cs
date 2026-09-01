@@ -123,7 +123,9 @@ public sealed class RuleEngine(
                 rule.EffectiveRetryMs,
                 target.ExpectedBounds,
                 () => placer.Apply(handle, info.ProcessId, startTicks, target),
-                ct).ConfigureAwait(false);
+                ct,
+                rule.Place.State,
+                monitor.Bounds).ConfigureAwait(false);
 
             var detail = $"{monitor.GdiName} {rule.Place.State}";
             if (!outcome.Settled && outcome.Observed.Count > 0)

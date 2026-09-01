@@ -1,6 +1,7 @@
 using MonSelect.Core.Engine;
 using MonSelect.Core.Tests.Fakes;
 using MonSelect.Core.Win32;
+using MonSelect.Core.Windows;
 
 namespace MonSelect.Core.Tests;
 
@@ -208,5 +209,112 @@ public class RetrySchedulerTests
 
         Assert.False(result.Settled);
         Assert.Equal(1, result.Attempts);
+    }
+
+    // --- Defecto 2: Maximized siempre se logueaba Resisted por el borde
+    // invisible que DWM agrega en Windows 11 (~8px) alrededor del rect
+    // maximizado. GetWindowRect nunca coincide exactamente con el work area
+    // aunque la ventana esté perfectamente maximizada, así que para Maximized
+    // "asentado" es show state + monitor, no igualdad de rect. Ver
+    // RetryScheduler.IsMaximizedSettled.
+
+    private static readonly Rect RightMonitorBounds = Rect.FromLtrb(3000, 0, 4920, 1080);
+    private static readonly Rect RightMonitorWorkArea = Rect.FromLtrb(3000, 0, 4920, 1048);
+
+    // El "borde invisible" real medido en Windows 11 (docs/superpowers/findings/f1-acceptance.md):
+    // (2992,-8)-(4928,1056) en vez del work area exacto (3000,0)-(4920,1048).
+    private static readonly Rect ObservedWithDwmBorder = Rect.FromLtrb(2992, -8, 4928, 1056);
+
+    [Fact]
+    public async Task Maximized_settles_on_the_first_attempt_despite_the_DWM_invisible_resize_border()
+    {
+        var system = new FakeWindowSystem();
+        var window = system.Add(Hwnd, Elsewhere, 0);
+        var delay = new FakeDelay();
+        var scheduler = new RetryScheduler(system, delay);
+
+        var result = await scheduler.RunAsync(
+            Hwnd, Schedule, RightMonitorWorkArea,
+            attempt: () =>
+            {
+                window.Style = (uint)WindowStyles.Maximize;
+                system.SetObservedBounds(Hwnd, ObservedWithDwmBorder);
+            },
+            CancellationToken.None,
+            state: WindowState.Maximized,
+            monitorBounds: RightMonitorBounds);
+
+        Assert.True(result.Settled);
+        Assert.Equal(1, result.Attempts);
+    }
+
+    [Fact]
+    public async Task Maximized_keeps_retrying_if_the_show_state_never_actually_becomes_maximized()
+    {
+        // El bounds observado cae justo donde se lo pidió, pero WS_MAXIMIZE
+        // nunca se prendió (la app se resistió a maximizar de verdad): no
+        // alcanza con el rect, tiene que ser realmente Maximized.
+        var system = new FakeWindowSystem();
+        var window = system.Add(Hwnd, Elsewhere, 0);
+        var scheduler = new RetryScheduler(system, new FakeDelay());
+
+        var result = await scheduler.RunAsync(
+            Hwnd, Schedule, RightMonitorWorkArea,
+            attempt: () => system.SetObservedBounds(Hwnd, RightMonitorWorkArea),
+            CancellationToken.None,
+            state: WindowState.Maximized,
+            monitorBounds: RightMonitorBounds);
+
+        Assert.False(result.Settled);
+        Assert.Equal(Schedule.Length, result.Attempts);
+    }
+
+    [Fact]
+    public async Task Maximized_keeps_retrying_if_it_lands_maximized_on_the_wrong_monitor()
+    {
+        // Maximiza de verdad (WS_MAXIMIZE prendido) pero en OTRO monitor: el
+        // show state solo no alcanza, tiene que ser en el monitor pedido.
+        var system = new FakeWindowSystem();
+        var window = system.Add(Hwnd, Elsewhere, 0);
+        var scheduler = new RetryScheduler(system, new FakeDelay());
+
+        var result = await scheduler.RunAsync(
+            Hwnd, Schedule, RightMonitorWorkArea,
+            attempt: () =>
+            {
+                window.Style = (uint)WindowStyles.Maximize;
+                system.SetObservedBounds(Hwnd, Elsewhere); // otro monitor, lejos de RightMonitorBounds
+            },
+            CancellationToken.None,
+            state: WindowState.Maximized,
+            monitorBounds: RightMonitorBounds);
+
+        Assert.False(result.Settled);
+        Assert.Equal(Schedule.Length, result.Attempts);
+    }
+
+    [Fact]
+    public async Task Normal_still_requires_the_exact_rect_and_ignores_a_near_miss()
+    {
+        // La distinción es sólo para Maximized/Minimized: Normal (y Borderless,
+        // mismo camino) siguen exigiendo el rect exacto. Una ventana a un par de
+        // píxeles del target sigue contando como resistida, no "suficientemente
+        // cerca" — un blanket tolerance acá se filtraría a Borderless, donde un
+        // margen de 8px se ve como una franja de escritorio.
+        var system = new FakeWindowSystem();
+        system.Add(Hwnd, Elsewhere, 0);
+        var scheduler = new RetryScheduler(system, new FakeDelay());
+
+        var almostWanted = Rect.FromLtrb(Wanted.Left + 2, Wanted.Top, Wanted.Right + 2, Wanted.Bottom);
+
+        var result = await scheduler.RunAsync(
+            Hwnd, Schedule, Wanted,
+            attempt: () => system.SetObservedBounds(Hwnd, almostWanted),
+            CancellationToken.None,
+            state: WindowState.Normal,
+            monitorBounds: RightMonitorBounds);
+
+        Assert.False(result.Settled);
+        Assert.Equal(Schedule.Length, result.Attempts);
     }
 }

@@ -31,11 +31,14 @@ public class WindowPlacerTests : IDisposable
                expected ?? Rect.FromLtrb(3000, 0, 4920, 1048));
 
     [Fact]
-    public void Maximized_sets_placement_without_touching_the_style()
+    public void Maximized_sets_placement_without_calling_SetStyle_directly()
     {
         _placer.Apply(Hwnd, 1, 1, Target(ShowCommand.Maximized, strip: false));
 
-        Assert.Equal(Overlapped, _system[Hwnd].Style);
+        // WindowPlacer no llama SetStyle para Maximized: el bit WS_MAXIMIZE que
+        // termina prendido acá es un efecto secundario de SetWindowPlacement en
+        // el propio Win32 (lo reproduce el fake), no algo que WindowPlacer haga.
+        Assert.Equal(Overlapped | (uint)WindowStyles.Maximize, _system[Hwnd].Style);
         Assert.Contains(_system.Calls, c => c.StartsWith("SetPlacement("));
         Assert.DoesNotContain(_system.Calls, c => c.StartsWith("SetStyle("));
     }

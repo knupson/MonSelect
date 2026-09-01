@@ -26,12 +26,30 @@ public sealed record RetryOutcome(bool Settled, int Attempts, IReadOnlyList<Rect
 /// </summary>
 public sealed class RetryScheduler(IWindowSystem system, IDelay delay)
 {
+    /// <param name="state">
+    /// Qué significa "asentado" para este intento. Para <see cref="WindowState.Normal"/>
+    /// y <see cref="WindowState.Borderless"/> el target es exacto, así que se sigue
+    /// comparando <paramref name="expectedBounds"/> por igualdad. Para
+    /// <see cref="WindowState.Maximized"/>, DWM en Windows 11 agrega ~8px de borde
+    /// invisible alrededor del rect maximizado: <c>GetWindowRect</c> nunca coincide
+    /// con el work area aunque la ventana esté perfectamente maximizada, así que acá
+    /// se compara el show state (vía <c>GetStyle</c>) más el monitor donde cayó
+    /// (<paramref name="monitorBounds"/>), no el rect. Minimized sigue el camino
+    /// <c>!comparable</c> de abajo (expectedBounds vacío = un solo intento, sin bounds
+    /// observables que comparar) y no usa este parámetro.
+    /// </param>
+    /// <param name="monitorBounds">
+    /// Sólo se usa cuando <paramref name="state"/> es Maximized: el rect completo del
+    /// monitor de destino, para decidir si la ventana terminó ahí.
+    /// </param>
     public async Task<RetryOutcome> RunAsync(
         nint handle,
         IReadOnlyList<int> scheduleMs,
         Rect expectedBounds,
         Action attempt,
-        CancellationToken ct)
+        CancellationToken ct,
+        WindowState state = WindowState.Normal,
+        Rect monitorBounds = default)
     {
         var observed = new List<Rect>();
 
@@ -75,7 +93,9 @@ public sealed class RetryScheduler(IWindowSystem system, IDelay delay)
 
                 // Se corta cuando el resultado es el buscado y además es estable:
                 // dos lecturas seguidas iguales significan que la app dejó de pelear.
-                var onTarget = actual == expectedBounds;
+                var onTarget = state == WindowState.Maximized
+                    ? IsMaximizedSettled(handle, actual, monitorBounds)
+                    : actual == expectedBounds;
                 var stable = observed.Count >= 2 && observed[^1] == observed[^2];
 
                 if (onTarget && (stable || observed.Count == 1))
@@ -92,5 +112,25 @@ public sealed class RetryScheduler(IWindowSystem system, IDelay delay)
         }
 
         return new RetryOutcome(false, scheduleMs.Count, observed);
+    }
+
+    /// <summary>
+    /// Para Maximized, "asentado" es el show state (maximizada, no minimizada) más
+    /// haber caído en el monitor de destino — no el rect exacto. Ver el comentario
+    /// de <see cref="RunAsync"/> sobre por qué: el borde invisible de DWM en Windows
+    /// 11 hace que <c>GetWindowRect</c> nunca coincida con el work area.
+    /// </summary>
+    private bool IsMaximizedSettled(nint handle, Rect actual, Rect monitorBounds)
+    {
+        var style = system.GetStyle(handle);
+        var isMaximized = (style & (uint)WindowStyles.Maximize) != 0
+                           && (style & (uint)WindowStyles.Minimize) == 0;
+        if (!isMaximized)
+            return false;
+
+        var cx = actual.Left + actual.Width / 2;
+        var cy = actual.Top + actual.Height / 2;
+        return cx >= monitorBounds.Left && cx < monitorBounds.Right
+               && cy >= monitorBounds.Top && cy < monitorBounds.Bottom;
     }
 }

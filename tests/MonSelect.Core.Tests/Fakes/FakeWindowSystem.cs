@@ -67,6 +67,18 @@ public sealed class FakeWindowSystem : IWindowSystem
         w.NormalPosition = normalPosition;
         w.Bounds = showCmd == ShowCommand.Normal ? normalPosition : w.Bounds;
 
+        // El Win32 real prende/apaga WS_MAXIMIZE y WS_MINIMIZE como efecto de
+        // SetWindowPlacement; sin esto el fake no puede probar la lógica de
+        // RetryScheduler que mira GetStyle para decidir si Maximized asentó.
+        const uint maximizeMinimizeBits = (uint)(WindowStyles.Maximize | WindowStyles.Minimize);
+        w.Style &= ~maximizeMinimizeBits;
+        w.Style |= showCmd switch
+        {
+            ShowCommand.Maximized => (uint)WindowStyles.Maximize,
+            ShowCommand.Minimized => (uint)WindowStyles.Minimize,
+            _ => 0,
+        };
+
         Settle(w);
     }
 
