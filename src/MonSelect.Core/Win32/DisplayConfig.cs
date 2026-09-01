@@ -51,7 +51,8 @@ internal struct DisplayConfigModeInfo
     public uint infoType;
     public uint id;
     public Luid adapterId;
-    // Union de 64 bytes: targetMode / sourceMode / desktopImageInfo.
+    // Union de 48 bytes: targetMode / sourceMode / desktopImageInfo.
+    // Header (16 bytes) + union (48 bytes) = struct de 64 bytes total.
     // MonSelect no la lee, sólo necesita el tamaño correcto.
     public ulong union0;
     public ulong union1;
@@ -59,8 +60,6 @@ internal struct DisplayConfigModeInfo
     public ulong union3;
     public ulong union4;
     public ulong union5;
-    public ulong union6;
-    public ulong union7;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -101,6 +100,13 @@ internal static class DisplayConfigNative
     internal const uint DEVICE_INFO_GET_SOURCE_NAME = 1;
     internal const uint DEVICE_INFO_GET_TARGET_NAME = 2;
     internal const int ERROR_SUCCESS = 0;
+
+    /// <summary>
+    /// Retorno documentado de QueryDisplayConfig cuando la topología de
+    /// pantallas cambió entre GetDisplayConfigBufferSizes y la llamada real:
+    /// hay que repetir ambas llamadas con buffers nuevos.
+    /// </summary>
+    internal const int ERROR_INSUFFICIENT_BUFFER = 122;
 
     [DllImport("user32.dll")]
     internal static extern int GetDisplayConfigBufferSizes(
