@@ -20,6 +20,13 @@ public interface IWindowSystem
     /// no la deja: el snap razona en coordenadas visibles.
     /// </summary>
     Rect GetVisibleBounds(nint handle);
+
+    /// <summary>
+    /// Pide a DWM que no redondee las esquinas. Windows 11 las redondea en toda
+    /// ventana en estado normal, y en una ventana pegada al borde del monitor
+    /// eso deja ver el fondo de escritorio en las cuatro puntas.
+    /// </summary>
+    void SetSquareCorners(nint handle);
     uint GetStyle(nint handle);
     void SetStyle(nint handle, uint style);
 

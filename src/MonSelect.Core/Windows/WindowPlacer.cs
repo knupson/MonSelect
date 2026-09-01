@@ -18,6 +18,12 @@ public sealed class WindowPlacer(IWindowSystem system, StyleStore styles)
 
         // SetWindowPlacement fija showCmd y rcNormalPosition juntos. Hacerlo en
         // dos pasos haría que la ventana aparezca en el monitor viejo y salte.
+        // Una ventana colocada en un rect exacto se quiere pegada a algo: al
+        // borde del monitor o a otra ventana. El redondeo de Win11 deja ver el
+        // escritorio justo en esas juntas.
+        if (target.ShowCmd == ShowCommand.Normal)
+            system.SetSquareCorners(handle);
+
         system.SetPlacement(handle, target.ShowCmd, ToOuterRect(handle, target.NormalPosition));
     }
 

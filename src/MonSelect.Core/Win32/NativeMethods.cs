@@ -140,6 +140,12 @@ internal static class NativeMethods
     internal static extern bool PostThreadMessageW(uint thread, uint msg, nint wParam, nint lParam);
 
     internal const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+    internal const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    internal const int DWMWCP_DONOTROUND = 1;
+
+    [DllImport("dwmapi.dll")]
+    internal static extern int DwmSetWindowAttribute(
+        nint hwnd, int attribute, ref int value, int size);
 
     [DllImport("dwmapi.dll")]
     internal static extern int DwmGetWindowAttribute(

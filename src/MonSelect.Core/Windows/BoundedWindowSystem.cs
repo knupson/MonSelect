@@ -76,6 +76,7 @@ public sealed class BoundedWindowSystem : IWindowSystem
     public bool IsVisible(nint handle) => _inner.IsVisible(handle);
     public Rect GetBounds(nint handle) => _inner.GetBounds(handle);
     public Rect GetVisibleBounds(nint handle) => _inner.GetVisibleBounds(handle);
+    public void SetSquareCorners(nint handle) => _inner.SetSquareCorners(handle);
     public uint GetStyle(nint handle) => _inner.GetStyle(handle);
 
     public void SetStyle(nint handle, uint style)

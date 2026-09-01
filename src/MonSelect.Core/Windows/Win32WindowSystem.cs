@@ -16,6 +16,13 @@ public sealed class Win32WindowSystem : IWindowSystem
     public Rect GetBounds(nint handle)
         => NativeMethods.GetWindowRect(handle, out var rect) ? rect : default;
 
+    public void SetSquareCorners(nint handle)
+    {
+        var preference = NativeMethods.DWMWCP_DONOTROUND;
+        NativeMethods.DwmSetWindowAttribute(
+            handle, NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+    }
+
     public Rect GetVisibleBounds(nint handle)
     {
         // Si DWM no sabe responder (ventana sin composición), el rect externo es

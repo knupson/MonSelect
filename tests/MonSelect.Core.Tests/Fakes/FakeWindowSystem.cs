@@ -52,6 +52,8 @@ public sealed class FakeWindowSystem : IWindowSystem
     public Rect GetBounds(nint handle) => _windows[handle].Bounds;
 
     /// <summary>Sin marco invisible por defecto; los tests que lo necesiten fijan <see cref="Window.FrameInset"/>.</summary>
+    public void SetSquareCorners(nint handle) => Calls.Add($"SetSquareCorners({handle})");
+
     public Rect GetVisibleBounds(nint handle)
     {
         var w = _windows[handle];

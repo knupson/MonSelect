@@ -32,6 +32,7 @@ public class BoundedWindowSystemTests
         public Rect GetBounds(nint handle) => default;
 
         public Rect GetVisibleBounds(nint handle) => GetBounds(handle);
+        public void SetSquareCorners(nint handle) { }
         public uint GetStyle(nint handle) => 0;
         public void SetStyle(nint handle, uint style) { }
         public void ApplyFrameChange(nint handle) { }
