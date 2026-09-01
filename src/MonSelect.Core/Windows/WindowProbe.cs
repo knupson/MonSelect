@@ -2,12 +2,19 @@ using MonSelect.Core.Win32;
 
 namespace MonSelect.Core.Windows;
 
+/// <summary>Lo que el motor necesita saber de una ventana. Existe para poder stubbearlo.</summary>
+public interface IWindowDescriber
+{
+    WindowInfo? Describe(nint handle);
+    long StartTicksOf(uint pid);
+}
+
 /// <summary>
 /// Construye el <see cref="WindowInfo"/> de un hwnd. Cachea exe path y command
 /// line por pid: no cambian mientras el proceso viva, y leer el PEB en cada
 /// evento sería caro.
 /// </summary>
-public sealed class WindowProbe(IWindowSystem system)
+public sealed class WindowProbe(IWindowSystem system) : IWindowDescriber
 {
     private readonly Dictionary<uint, (string? Exe, string? CommandLine, long StartTicks)> _byPid = new();
 
