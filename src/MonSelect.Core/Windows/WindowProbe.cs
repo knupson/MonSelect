@@ -53,7 +53,13 @@ public sealed class WindowProbe(IWindowSystem system) : IWindowDescriber
             ProcessQuery.GetCommandLine(pid),
             ProcessQuery.GetStartTicks(pid));
 
-        _byPid[pid] = facts;
+        // Un fallo NO se cachea. Leer el PEB de un proceso que todavía se está
+        // iniciando devuelve null, y guardarlo dejaría a esa instancia sin
+        // command line para siempre: sus reglas no volverían a matchear nunca,
+        // sin error visible. Se reintenta en el próximo evento de esa ventana.
+        if (facts.Item1 is not null && facts.Item2 is not null)
+            _byPid[pid] = facts;
+
         return facts;
     }
 
