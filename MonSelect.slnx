@@ -5,4 +5,8 @@
   <Folder Name="/tests/">
     <Project Path="tests/MonSelect.Core.Tests/MonSelect.Core.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/" />
+  <Folder Name="/tools/probe/">
+    <Project Path="tools/probe/Probe.csproj" />
+  </Folder>
 </Solution>
