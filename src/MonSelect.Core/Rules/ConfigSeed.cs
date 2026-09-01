@@ -46,7 +46,15 @@ public static class ConfigSeed
         }
     }
 
+    /// <summary>
+    /// Puramente cosmético: nada matchea contra esto. \\.\DISPLAY1 se escribe
+    /// como DISPLAY1 para que, al lado del path entre comillas simples, no
+    /// desentone con una fila de barras invertidas escapadas.
+    /// </summary>
     private static string Label(MonitorInfo monitor)
-        => $"{monitor.GdiName} {monitor.Bounds.Width}x{monitor.Bounds.Height}"
-           + (monitor.IsPrimary ? " (principal)" : string.Empty);
+    {
+        var name = monitor.GdiName.TrimStart('\\', '.');
+        return $"{name} {monitor.Bounds.Width}x{monitor.Bounds.Height}"
+               + (monitor.IsPrimary ? " (principal)" : string.Empty);
+    }
 }

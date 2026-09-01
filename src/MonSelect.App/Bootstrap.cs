@@ -73,12 +73,34 @@ public sealed class Bootstrap : IDisposable
     /// Una config ilegible deja las reglas anteriores en memoria. Quedarse sin
     /// reglas por un dos puntos faltante sería peor que el error.
     /// </summary>
+    /// <remarks>
+    /// Un guardado atómico (temp file + rename) puede dejar rules.yaml
+    /// momentáneamente bloqueado justo cuando el debounce dispara la lectura;
+    /// un único reintento corto absorbe esa carrera sin esconder un error real.
+    /// </remarks>
     public void ReloadConfig()
     {
         try
         {
             Engine.UpdateRules(YamlStore.Load(ConfigPaths.Rules));
             LastConfigError = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            try
+            {
+                Thread.Sleep(50);
+                Engine.UpdateRules(YamlStore.Load(ConfigPaths.Rules));
+                LastConfigError = null;
+            }
+            catch (RuleSetFormatException retryEx)
+            {
+                LastConfigError = retryEx.Message;
+            }
+            catch (Exception retryEx) when (retryEx is IOException or UnauthorizedAccessException)
+            {
+                LastConfigError = retryEx.Message;
+            }
         }
         catch (RuleSetFormatException ex)
         {
@@ -94,11 +116,17 @@ public sealed class Bootstrap : IDisposable
 
         _configWatcher = new FileSystemWatcher(ConfigPaths.Root, "rules.yaml")
         {
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
             EnableRaisingEvents = true,
         };
 
+        // Un editor que guarda atómicamente (temp file + rename, el default de VS
+        // Code y de muchos otros) nunca dispara Changed sobre rules.yaml: dispara
+        // Created o Renamed en su lugar. Los tres van al mismo debounce, así que
+        // una secuencia de varios eventos por el mismo guardado sólo recarga una vez.
         _configWatcher.Changed += (_, _) => DebouncedReload();
+        _configWatcher.Created += (_, _) => DebouncedReload();
+        _configWatcher.Renamed += (_, _) => DebouncedReload();
     }
 
     /// <summary>Los editores escriben en varios pasos; sin debounce se recarga a medio guardar.</summary>

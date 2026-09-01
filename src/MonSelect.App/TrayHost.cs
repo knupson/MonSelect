@@ -32,8 +32,20 @@ public sealed class TrayHost : IDisposable
         UpdateTooltip();
     }
 
+    /// <summary>
+    /// ConfigChanged se dispara desde el debounce del FileSystemWatcher, en un
+    /// hilo de threadpool. NotifyIcon suele tolerar mutaciones fuera del hilo de
+    /// UI, pero el resto del código respeta esa frontera, así que acá también.
+    /// </summary>
     private void UpdateTooltip()
     {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(UpdateTooltip);
+            return;
+        }
+
         var error = _bootstrap.LastConfigError;
         _icon.Text = error is null
             ? "MonSelect"
