@@ -3,10 +3,10 @@ bin/
 obj/
 [Dd]ebug/
 [Rr]elease/
-x64/
-x86/
-[Ww][Ii][Nn]32/
-[Aa][Rr][Mm]64/
+/x64/
+/x86/
+/[Ww][Ii][Nn]32/
+/[Aa][Rr][Mm]64/
 publish/
 artifacts/
 
