@@ -17,15 +17,25 @@ internal partial class CreateRuleDialog : Window
     private readonly bool _includeCommandLine;
     private readonly bool _includeTitle;
 
+    /// <summary>
+    /// Borde propio de la app (F2), medido contra la ventana en el momento de
+    /// capturarla — 0 si no se pidió medir. Se pasa a WindowToRule para que el
+    /// rect guardado, encogido por este tanto, reproduzca al aplicar la regla
+    /// exactamente los mismos píxeles que se ven ahora.
+    /// </summary>
+    private readonly int _bleed;
+
     /// <summary>La regla final, lista para agregar a rules.yaml, si el usuario guardó.</summary>
     public Rule? Result { get; private set; }
 
-    public CreateRuleDialog(OpenWindowRow row, string monitorAlias, bool includeCommandLine, bool includeTitle)
+    public CreateRuleDialog(
+        OpenWindowRow row, string monitorAlias, bool includeCommandLine, bool includeTitle, int bleed = 0)
     {
         _row = row;
         _monitorAlias = monitorAlias;
         _includeCommandLine = includeCommandLine;
         _includeTitle = includeTitle;
+        _bleed = bleed;
 
         InitializeComponent();
         NameBox.Text = DefaultName(row);
@@ -45,7 +55,8 @@ internal partial class CreateRuleDialog : Window
         try
         {
             var rule = WindowToRule.Convert(
-                _row.Info, _row.VisibleBounds, _monitorAlias, name, _includeCommandLine, _includeTitle);
+                _row.Info, _row.VisibleBounds, _monitorAlias, name, _includeCommandLine, _includeTitle,
+                bleed: _bleed);
             Result = rule;
             YamlPreview.Text = YamlStore.RenderRule(rule);
         }

@@ -89,53 +89,7 @@ internal partial class GuiWindow : Window
         RenderMap();
     }
 
-    private List<OpenWindowRow> BuildOpenWindowRows()
-    {
-        var set = _bootstrap.CurrentRuleSet;
-        var rows = new List<OpenWindowRow>();
-
-        foreach (var handle in TopLevelWindows.Enumerate())
-        {
-            var info = _bootstrap.Probe.Describe(handle);
-            if (info is null || string.IsNullOrEmpty(info.Title))
-                continue;
-
-            var visible = _bootstrap.WindowSystem.GetVisibleBounds(handle);
-            var monitor = _bootstrap.MonitorSystem.GetMonitorForRect(info.Bounds);
-            var monitorLabel = monitor is null ? "?" : set.AliasFor(monitor.Id) ?? monitor.GdiName;
-            var matched = RuleMatcher.FirstMatch(set.Rules, info)?.Name ?? string.Empty;
-
-            rows.Add(new OpenWindowRow
-            {
-                Handle = handle,
-                Title = info.Title,
-                Process = ProcessName(info),
-                ExePath = info.ExePath ?? "(sin acceso)",
-                ClassName = info.ClassName,
-                CommandLine = info.CommandLine ?? "(sin acceso)",
-                MonitorLabel = monitorLabel,
-                StateLabel = info.CurrentState.ToString(),
-                MatchedRule = matched,
-                Info = info,
-                VisibleBounds = visible,
-            });
-        }
-
-        return rows.OrderBy(r => r.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
-    }
-
-    /// <summary>WindowInfo no trae el nombre de proceso "lindo"; Process.GetProcessById puede fallar (proceso elevado, ya murió).</summary>
-    private static string ProcessName(WindowInfo info)
-    {
-        try
-        {
-            return Process.GetProcessById((int)info.ProcessId).ProcessName;
-        }
-        catch
-        {
-            return info.ExePath is { } exe ? Path.GetFileNameWithoutExtension(exe) : string.Empty;
-        }
-    }
+    private List<OpenWindowRow> BuildOpenWindowRows() => OpenWindowRowBuilder.Build(_bootstrap);
 
     private void OpenWindowsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -189,14 +143,22 @@ internal partial class GuiWindow : Window
     private OpenWindowRow? SelectedOpenWindow() => OpenWindowsGrid.SelectedItem as OpenWindowRow;
 
     /// <summary>
-    /// "Crear regla desde esta ventana": arma la regla con WindowToRule (Core,
-    /// puro), la muestra en el diálogo de confirmación y, si el usuario guarda,
-    /// la agrega a rules.yaml. No mueve ni toca la ventana real — sólo la lee.
+    /// F3, captura guiada: "colocá la ventana donde la querés y dale aplicar".
+    /// Primero se le pide al usuario que acomode la ventana a mano
+    /// (<see cref="CaptureWindowDialog"/>, con feedback en vivo); recién al
+    /// confirmar se lee dónde quedó y se arma la regla con WindowToRule (Core,
+    /// puro) sobre esa posición fresca — no la que tenía al abrir la pestaña.
+    /// El nombre y la vista previa de YAML se piden después, reusando
+    /// CreateRuleDialog. En ningún paso se mueve ni se toca la ventana real.
     /// </summary>
     private void CreateRule_Click(object sender, RoutedEventArgs e)
     {
-        var row = SelectedOpenWindow();
-        if (row is null)
+        var selected = SelectedOpenWindow();
+        if (selected is null)
+            return;
+
+        var capture = new CaptureWindowDialog(_bootstrap, selected.Handle, selected.Title) { Owner = this };
+        if (capture.ShowDialog() != true || capture.Captured is not { } row)
             return;
 
         var set = _bootstrap.CurrentRuleSet;
@@ -206,14 +168,21 @@ internal partial class GuiWindow : Window
         if (alias is null)
         {
             MessageBox.Show(this,
-                "El monitor donde está esta ventana no tiene alias en el bloque monitors: de rules.yaml. " +
+                "El monitor donde quedó esta ventana no tiene alias en el bloque monitors: de rules.yaml. " +
                 "Reiniciá MonSelect para que lo genere, o agregalo a mano.",
                 "No se puede crear la regla", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
+        // F2: cuánto se come de su propio rect visible la app en sí (borde
+        // dibujado adentro). Se mide contra la posición recién confirmada, no
+        // la de apertura de la pestaña, y se graba explícito en la regla para
+        // que aplicarla reproduzca los mismos píxeles sin depender de una
+        // remedición futura.
+        var bleed = _bootstrap.WindowSystem.MeasureContentInset(row.Handle);
+
         var dialog = new CreateRuleDialog(
-            row, alias, IncludeCmdlineCheck.IsChecked == true, IncludeTitleCheck.IsChecked == true)
+            row, alias, IncludeCmdlineCheck.IsChecked == true, IncludeTitleCheck.IsChecked == true, bleed)
         {
             Owner = this,
         };
@@ -258,6 +227,55 @@ internal partial class GuiWindow : Window
     {
         // Sin selección propia por ahora: cada acción (arriba/abajo/borrar/probar)
         // ya lleva su propia fila por DataContext del botón que se apretó.
+    }
+
+    /// <summary>F1: doble click abre el editor completo, igual que el botón "Editar".</summary>
+    private void RulesGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (RulesGrid.SelectedItem is RuleRow row)
+            OpenRuleEditor(row.Rule);
+    }
+
+    /// <summary>
+    /// F1: "Editar" abre un editor con todos los campos de la regla, valida
+    /// antes de guardar (RuleValidation, que reusa los mensajes de YamlStore) y
+    /// muestra en vivo qué ventanas abiertas matchean. No muta ninguna ventana.
+    /// </summary>
+    private void EditRule_Click(object sender, RoutedEventArgs e)
+    {
+        if (RowOf(sender) is not { } row)
+            return;
+
+        OpenRuleEditor(row.Rule);
+    }
+
+    private void OpenRuleEditor(Rule rule)
+    {
+        var dialog = new RuleEditorDialog(_bootstrap, rule) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.Result is not { } edited)
+            return;
+
+        try
+        {
+            var set = YamlStore.Load(ConfigPaths.Rules);
+            var rules = set.Rules.ToList();
+            var index = rules.FindIndex(r => r.Name == dialog.OriginalName);
+            if (index < 0)
+            {
+                MessageBox.Show(this,
+                    "La regla ya no está en rules.yaml (¿la borró o renombró otra ventana?); no se guardó el cambio.",
+                    "MonSelect", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            rules[index] = edited;
+            SaveRules(set with { Rules = rules });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"No se pudo guardar rules.yaml: {ex.Message}", "Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void MoveRuleUp_Click(object sender, RoutedEventArgs e) => MoveRule(sender, -1);

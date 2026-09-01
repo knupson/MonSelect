@@ -349,9 +349,10 @@
                         <StackPanel Orientation="Horizontal">
                             <CheckBox x:Name="IncludeCmdlineCheck" Content="Incluir command line" Margin="0,0,18,0"/>
                             <CheckBox x:Name="IncludeTitleCheck" Content="Incluir título (regex)" Margin="0,0,18,0"/>
-                            <Button x:Name="CreateRuleButton" Content="Crear regla desde esta ventana"
+                            <Button x:Name="CreateRuleButton" Content="Capturar posición de esta ventana"
                                     Style="{StaticResource AccentButton}" Click="CreateRule_Click" IsEnabled="False"
-                                    Margin="0,0,18,0"/>
+                                    Margin="0,0,18,0"
+                                    ToolTip="Acomodá la ventana a mano y confirmá: la regla se arma desde donde quede, no desde donde está ahora."/>
                             <TextBlock x:Name="OpenWindowsHint" Style="{StaticResource Label}"
                                        VerticalAlignment="Center"
                                        Text="Seleccioná una ventana, arriba en la tabla o en el mapa."/>
@@ -386,6 +387,7 @@
                     <!-- Alto = a su contenido, con techo: una lista de reglas real no tiene
                          cientos de filas, y así no deja un panel vacío debajo de 3 o 4. -->
                     <DataGrid x:Name="RulesGrid" Grid.Row="1" SelectionChanged="RulesGrid_SelectionChanged"
+                              MouseDoubleClick="RulesGrid_MouseDoubleClick"
                               AlternationCount="1000" MaxHeight="440" VerticalScrollBarVisibility="Auto">
                         <DataGrid.Columns>
                             <DataGridTemplateColumn Header="#" Width="28">
@@ -412,7 +414,7 @@
                                                  ElementStyle="{StaticResource Mono}"/>
                             <DataGridTextColumn Header="DESTINO" Binding="{Binding Destination}" Width="0.85*"/>
                             <DataGridTextColumn Header="ESTADO" Binding="{Binding StateLabel}" Width="0.75*"/>
-                            <DataGridTemplateColumn Header="" Width="176">
+                            <DataGridTemplateColumn Header="" Width="256">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal">
@@ -420,6 +422,8 @@
                                                     ToolTip="Subir prioridad"/>
                                             <Button Content="↓" Width="24" Padding="0" Margin="1,0" Click="MoveRuleDown_Click"
                                                     ToolTip="Bajar prioridad"/>
+                                            <Button Content="Editar" Padding="6,2" Margin="1,0" Click="EditRule_Click"
+                                                    ToolTip="Editar todos los campos de esta regla"/>
                                             <Button Content="Probar" Padding="6,2" Margin="1,0" Click="ApplyRule_Click"
                                                     ToolTip="Aplicar esta regla a las ventanas abiertas que matcheen"/>
                                             <Button Content="Eliminar" Padding="6,2" Margin="1,0" Click="DeleteRule_Click"/>

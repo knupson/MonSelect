@@ -1,0 +1,73 @@
+<Window x:Class="MonSelect.App.CaptureWindowDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:ClassModifier="internal"
+        Title="Capturar posición de la ventana" Width="820" Height="640" MinWidth="620" MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        Background="#0E1116" Foreground="#D6DCE4"
+        FontFamily="Segoe UI Variable, Segoe UI" FontSize="13"
+        Closing="Window_Closing">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Panel" Color="#161B22"/>
+        <SolidColorBrush x:Key="Line" Color="#2A313B"/>
+        <SolidColorBrush x:Key="Accent" Color="#E8A33D"/>
+        <SolidColorBrush x:Key="Muted" Color="#7C8899"/>
+
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource Panel}"/>
+            <Setter Property="Foreground" Value="#D6DCE4"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" FontSize="16" FontWeight="SemiBold" Text="Capturar posición de la ventana" Margin="0,0,0,6"/>
+        <TextBlock Grid.Row="1" x:Name="InstructionText" FontSize="13" TextWrapping="Wrap"
+                   Foreground="{StaticResource Accent}" Margin="0,0,0,14"/>
+
+        <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1">
+            <Canvas x:Name="MapCanvas" ClipToBounds="True" SizeChanged="MapCanvas_SizeChanged"/>
+        </Border>
+
+        <Border Grid.Row="3" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                Padding="12" Margin="0,10,0,0">
+            <TextBlock x:Name="LiveStatusText" FontFamily="Cascadia Mono, Consolas" FontSize="13" TextWrapping="Wrap"/>
+        </Border>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Cancelar" Click="Cancel_Click"/>
+            <Button x:Name="ConfirmButton" Content="Confirmar posición" Click="Confirm_Click"
+                    Background="{StaticResource Accent}" Foreground="#0E1116" FontWeight="SemiBold"/>
+        </StackPanel>
+    </Grid>
+</Window>
