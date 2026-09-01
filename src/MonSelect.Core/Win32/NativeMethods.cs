@@ -98,4 +98,47 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(nint hwnd, out uint pid);
+
+    internal const uint EVENT_OBJECT_SHOW = 0x8002;
+    internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    internal const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+    internal const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
+    internal const int OBJID_WINDOW = 0;
+    internal const int CHILDID_SELF = 0;
+
+    internal delegate void WinEventProc(
+        nint hook, uint eventType, nint hwnd, int idObject, int idChild, uint thread, uint time);
+
+    [DllImport("user32.dll")]
+    internal static extern nint SetWinEventHook(
+        uint min, uint max, nint module, WinEventProc callback, uint pid, uint thread, uint flags);
+
+    [DllImport("user32.dll")]
+    internal static extern bool UnhookWinEvent(nint hook);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Msg
+    {
+        public nint hwnd;
+        public uint message;
+        public nint wParam;
+        public nint lParam;
+        public uint time;
+        public Point pt;
+    }
+
+    [DllImport("user32.dll")]
+    internal static extern int GetMessageW(out Msg msg, nint hwnd, uint min, uint max);
+
+    [DllImport("user32.dll")]
+    internal static extern bool TranslateMessage(ref Msg msg);
+
+    [DllImport("user32.dll")]
+    internal static extern nint DispatchMessageW(ref Msg msg);
+
+    [DllImport("user32.dll")]
+    internal static extern bool PostThreadMessageW(uint thread, uint msg, nint wParam, nint lParam);
+
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
 }

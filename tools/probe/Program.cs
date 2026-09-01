@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using MonSelect.Core.Engine;
 using MonSelect.Core.Monitors;
 using MonSelect.Core.Win32;
 using MonSelect.Core.Windows;
@@ -40,6 +41,26 @@ if (args.Contains("--windows"))
     Console.WriteLine($"title    : {info.Title}");
     Console.WriteLine($"bounds   : {info.Bounds}");
     Console.WriteLine($"state    : {info.CurrentState}");
+    return;
+}
+
+if (args.Contains("--watch"))
+{
+    using var watcher = new WindowWatcher();
+    var probe = new WindowProbe(new Win32WindowSystem());
+
+    watcher.WindowAppeared += hwnd =>
+    {
+        var info = probe.Describe(hwnd);
+        if (info is null || string.IsNullOrEmpty(info.Title))
+            return;
+
+        Console.WriteLine($"{info.Title,-45} {Path.GetFileName(info.ExePath) ?? "?",-20} {info.ClassName}");
+    };
+
+    watcher.Start();
+    Console.WriteLine("Escuchando. Abrí aplicaciones. Enter para salir.");
+    Console.ReadLine();
     return;
 }
 
