@@ -16,6 +16,17 @@ public sealed class Win32WindowSystem : IWindowSystem
     public Rect GetBounds(nint handle)
         => NativeMethods.GetWindowRect(handle, out var rect) ? rect : default;
 
+    public Rect GetVisibleBounds(nint handle)
+    {
+        // Si DWM no sabe responder (ventana sin composición), el rect externo es
+        // la mejor aproximación disponible y el ajuste queda en cero.
+        var size = System.Runtime.InteropServices.Marshal.SizeOf<Rect>();
+        return NativeMethods.DwmGetWindowAttribute(
+            handle, NativeMethods.DWMWA_EXTENDED_FRAME_BOUNDS, out var visible, size) == 0
+            ? visible
+            : GetBounds(handle);
+    }
+
     public uint GetStyle(nint handle)
         => (uint)NativeMethods.GetWindowLongPtr(handle, GwlIndex.Style).ToInt64();
 

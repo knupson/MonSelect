@@ -139,6 +139,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern bool PostThreadMessageW(uint thread, uint msg, nint wParam, nint lParam);
 
+    internal const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+
+    [DllImport("dwmapi.dll")]
+    internal static extern int DwmGetWindowAttribute(
+        nint hwnd, int attribute, out Rect value, int size);
+
     internal const uint WM_TIMER = 0x0113;
 
     [DllImport("user32.dll")]

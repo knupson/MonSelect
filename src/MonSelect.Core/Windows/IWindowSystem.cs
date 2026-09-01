@@ -11,6 +11,15 @@ public interface IWindowSystem
     bool IsWindow(nint handle);
     bool IsVisible(nint handle);
     Rect GetBounds(nint handle);
+
+    /// <summary>
+    /// Rectángulo realmente visible. Difiere de <see cref="GetBounds"/> porque
+    /// DWM agrega un marco de redimensionado invisible (7px a los lados y abajo
+    /// en Win11). Si se ignora, una ventana colocada en el borde del monitor
+    /// deja una franja de escritorio a la vista, mientras que el snap de Windows
+    /// no la deja: el snap razona en coordenadas visibles.
+    /// </summary>
+    Rect GetVisibleBounds(nint handle);
     uint GetStyle(nint handle);
     void SetStyle(nint handle, uint style);
 

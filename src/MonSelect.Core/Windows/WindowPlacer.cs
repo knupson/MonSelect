@@ -18,7 +18,7 @@ public sealed class WindowPlacer(IWindowSystem system, StyleStore styles)
 
         // SetWindowPlacement fija showCmd y rcNormalPosition juntos. Hacerlo en
         // dos pasos haría que la ventana aparezca en el monitor viejo y salte.
-        system.SetPlacement(handle, target.ShowCmd, target.NormalPosition);
+        system.SetPlacement(handle, target.ShowCmd, ToOuterRect(handle, target.NormalPosition));
     }
 
     /// <summary>Devuelve false si la ventana nunca fue convertida a borderless.</summary>
@@ -71,6 +71,28 @@ public sealed class WindowPlacer(IWindowSystem system, StyleStore styles)
             styles.Save();
 
         return restored;
+    }
+
+    /// <summary>
+    /// Un rect escrito por una persona describe lo que se ve. Windows posiciona
+    /// por el rect externo, que incluye el marco invisible de DWM (7px a los
+    /// lados y abajo en Win11). Sin esta conversión, una ventana pegada al borde
+    /// del monitor deja una franja de escritorio visible — que es exactamente lo
+    /// que el snap de Windows no hace.
+    /// </summary>
+    private Rect ToOuterRect(nint handle, Rect wanted)
+    {
+        var outer = system.GetBounds(handle);
+        var visible = system.GetVisibleBounds(handle);
+
+        if (outer.IsEmpty || visible.IsEmpty)
+            return wanted;
+
+        return Rect.FromLtrb(
+            wanted.Left - (visible.Left - outer.Left),
+            wanted.Top - (visible.Top - outer.Top),
+            wanted.Right + (outer.Right - visible.Right),
+            wanted.Bottom + (outer.Bottom - visible.Bottom));
     }
 
     private void StripFrame(nint handle, uint processId, long processStartTicks)

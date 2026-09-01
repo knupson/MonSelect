@@ -30,6 +30,8 @@ public class BoundedWindowSystemTests
         public bool IsWindow(nint handle) => true;
         public bool IsVisible(nint handle) => true;
         public Rect GetBounds(nint handle) => default;
+
+        public Rect GetVisibleBounds(nint handle) => GetBounds(handle);
         public uint GetStyle(nint handle) => 0;
         public void SetStyle(nint handle, uint style) { }
         public void ApplyFrameChange(nint handle) { }

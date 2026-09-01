@@ -21,6 +21,9 @@ public sealed class FakeWindowSystem : IWindowSystem
         /// Rect al que la app se mueve sola después de cada intento, simulando
         /// una app que pelea. Null significa que coopera.
         /// </summary>
+        /// <summary>Ancho del marco invisible de DWM a simular, en px.</summary>
+        public int FrameInset { get; set; }
+
         public Rect? FightsBackTo { get; set; }
 
         /// <summary>Cuántos intentos resiste antes de rendirse.</summary>
@@ -47,6 +50,16 @@ public sealed class FakeWindowSystem : IWindowSystem
     public bool IsVisible(nint handle) => _windows.ContainsKey(handle);
 
     public Rect GetBounds(nint handle) => _windows[handle].Bounds;
+
+    /// <summary>Sin marco invisible por defecto; los tests que lo necesiten fijan <see cref="Window.FrameInset"/>.</summary>
+    public Rect GetVisibleBounds(nint handle)
+    {
+        var w = _windows[handle];
+        var i = w.FrameInset;
+        return i == 0
+            ? w.Bounds
+            : Rect.FromLtrb(w.Bounds.Left + i, w.Bounds.Top, w.Bounds.Right - i, w.Bounds.Bottom - i);
+    }
 
     public uint GetStyle(nint handle) => _windows[handle].Style;
 
