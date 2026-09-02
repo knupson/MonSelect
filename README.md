@@ -100,6 +100,22 @@ dotnet publish src/MonSelect.App/MonSelect.App.csproj -c Release -r win-x64 --se
 
 El documento de diseño está en [`docs/superpowers/specs/`](docs/superpowers/specs/), con las mediciones sobre las que se apoya y las correcciones de lo que resultó estar mal. Los hallazgos empíricos — en qué coordenadas vive `WINDOWPLACEMENT`, por qué el serial EDID no sirve como identificador de monitor — están en [`docs/superpowers/findings/`](docs/superpowers/findings/).
 
+## Qué hace en tu sistema
+
+Conviene saberlo antes de ejecutarlo, porque no es una aplicación corriente:
+
+- **Instala un hook global de Windows** (`SetWinEventHook`) para enterarse cuando aparece una ventana. Recibe eventos de todas las aplicaciones, no sólo de las que tienen regla.
+- **Lee la línea de comandos de otros procesos**, leyendo su PEB. Es lo que permite mandar dos sesiones del mismo programa a monitores distintos. Los procesos elevados o de otro usuario no se pueden leer, y sus reglas por `cmdline` simplemente no matchean.
+- **Mueve y redimensiona ventanas ajenas**, y en estado `borderless` les modifica el estilo. El estilo original se guarda para poder revertirlo.
+- **Escribe** en `%APPDATA%\MonSelect\` — reglas, log y estilos originales. Nada sale de la máquina: no hay telemetría ni conexiones de red.
+- Con `--install-autostart` registra una tarea programada con privilegios elevados, necesaria para tocar ventanas de aplicaciones que corren como administrador.
+
+El ejecutable **no está firmado**, así que Windows SmartScreen lo va a marcar como desconocido la primera vez: *Más información → Ejecutar de todas formas*. Si preferís no confiar en un binario sin firmar, compilalo vos con las instrucciones de arriba.
+
 ## Licencia
 
-MIT
+MIT — ver [`LICENSE`](LICENSE).
+
+El ejecutable publicado es autocontenido e incluye el runtime de .NET y YamlDotNet, ambos MIT. Sus avisos de copyright están en [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
+Sin garantía de ningún tipo, como dice la licencia. Es una herramienta que manipula ventanas de otros programas; probala con algo que no te importe antes de confiarle tu escritorio de trabajo.
