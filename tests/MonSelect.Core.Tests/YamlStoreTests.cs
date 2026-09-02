@@ -414,6 +414,174 @@ public class YamlStoreTests
         Assert.Empty(set.Monitors);
     }
 
+    // --- F1: la regla del dueño (JDownloader) desapareció de rules.yaml tras
+    // un guardado sin relación. Causa: un guardador serializaba un RuleSet leído
+    // en memoria antes de que otro guardador agregara una regla al archivo —
+    // "lost update" clásico. YamlStore.Update cierra esa ventana leyendo el
+    // archivo justo antes de aplicar el cambio, bajo un mutex.
+
+    /// <summary>
+    /// Regresión directa del defecto real: un componente carga el RuleSet
+    /// (como la GUI al abrir un diálogo), otro agrega una regla directo al
+    /// archivo (como la captura guiada), y el primero después guarda un cambio
+    /// no relacionado. Con <see cref="YamlStore.Update"/> — que releé el disco
+    /// justo antes de aplicar la mutación, en vez de reusar el RuleSet cargado
+    /// al principio — la regla agregada en el medio tiene que seguir ahí.
+    /// </summary>
+    [Fact]
+    public void Update_does_not_discard_a_rule_appended_by_another_writer_in_between()
+    {
+        var dir = Directory.CreateTempSubdirectory("monselect-tests");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "rules.yaml");
+            var ruleA = new Rule("Google Chat", MatchCriteria.Any,
+                new RulePlacement(new[] { "display3" }, WindowState.Normal, null));
+            YamlStore.Save(path, new RuleSet(1, new Dictionary<string, MonitorAlias>(), new[] { ruleA }));
+
+            // El "componente A" carga el set temprano — como la GUI al abrir la
+            // pestaña Reglas o al armar un diálogo — y se queda con esa copia
+            // en memoria un rato.
+            var loadedEarlyByComponentA = YamlStore.Load(path);
+            Assert.Single(loadedEarlyByComponentA.Rules);
+
+            // El "componente B" (la captura guiada) agrega una regla directo al
+            // archivo mientras tanto.
+            var ruleB = new Rule("JDownloader2", MatchCriteria.Any,
+                new RulePlacement(new[] { "display4" }, WindowState.Maximized, null));
+            YamlStore.Update(path, current => current with { Rules = current.Rules.Append(ruleB).ToList() });
+
+            // El "componente A" ahora guarda un cambio no relacionado (acá,
+            // deshabilitar la regla que ya tenía) usando Update, NO reusando
+            // `loadedEarlyByComponentA` con un Save directo.
+            YamlStore.Update(path, current => current with
+            {
+                Rules = current.Rules
+                    .Select(r => r.Name == ruleA.Name ? r with { Enabled = false } : r)
+                    .ToList(),
+            });
+
+            var final = YamlStore.Load(path);
+            Assert.Equal(2, final.Rules.Count);
+            Assert.Contains(final.Rules, r => r.Name == ruleB.Name);
+            Assert.Contains(final.Rules, r => r.Name == ruleA.Name && !r.Enabled);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// El mismo escenario con <see cref="YamlStore.Save"/> a secas (el patrón
+    /// que causaba el defecto) SÍ pierde la regla agregada en el medio — deja
+    /// registrado por qué <see cref="YamlStore.Update"/> hace falta y no es
+    /// sólo una preferencia de estilo.
+    /// </summary>
+    [Fact]
+    public void Save_with_a_stale_in_memory_snapshot_does_lose_a_concurrently_appended_rule()
+    {
+        var dir = Directory.CreateTempSubdirectory("monselect-tests");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "rules.yaml");
+            var ruleA = new Rule("Google Chat", MatchCriteria.Any,
+                new RulePlacement(new[] { "display3" }, WindowState.Normal, null));
+            YamlStore.Save(path, new RuleSet(1, new Dictionary<string, MonitorAlias>(), new[] { ruleA }));
+
+            var staleSnapshot = YamlStore.Load(path);
+
+            var ruleB = new Rule("JDownloader2", MatchCriteria.Any,
+                new RulePlacement(new[] { "display4" }, WindowState.Maximized, null));
+            YamlStore.Update(path, current => current with { Rules = current.Rules.Append(ruleB).ToList() });
+
+            // La regresión: guardar el snapshot leído ANTES del append de B.
+            YamlStore.Save(path, staleSnapshot with
+            {
+                Rules = staleSnapshot.Rules.Select(r => r with { Enabled = false }).ToList(),
+            });
+
+            var final = YamlStore.Load(path);
+            Assert.DoesNotContain(final.Rules, r => r.Name == ruleB.Name);
+            Assert.Single(final.Rules);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Save escribe a un temporal y recién ahí reemplaza el archivo real
+    /// (mismo patrón que StyleStore). Simula un crash a mitad de escritura
+    /// poniendo un directorio donde Save espera escribir su .tmp — WriteAllText
+    /// falla ahí, antes de tocar el archivo real, que tiene que quedar intacto.
+    /// </summary>
+    [Fact]
+    public void A_failed_write_leaves_the_original_file_untouched()
+    {
+        var dir = Directory.CreateTempSubdirectory("monselect-tests");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "rules.yaml");
+            var original = YamlStore.Parse(FullDocument);
+            YamlStore.Save(path, original);
+            var before = File.ReadAllText(path);
+
+            var tempPath = path + ".tmp";
+            Directory.CreateDirectory(tempPath); // un directorio con ese nombre hace fallar el WriteAllText.
+            try
+            {
+                // UnauthorizedAccessException en Windows (WriteAllText contra
+                // un path que resulta ser un directorio), no IOException.
+                Assert.ThrowsAny<Exception>(() => YamlStore.Save(path, original with
+                {
+                    Rules = original.Rules.Take(1).ToList(),
+                }));
+            }
+            finally
+            {
+                Directory.Delete(tempPath, recursive: true);
+            }
+
+            Assert.Equal(before, File.ReadAllText(path));
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>Antes de cada guardado se copia el archivo anterior a .bak, pisando el previo.</summary>
+    [Fact]
+    public void Save_keeps_a_rolling_backup_of_the_previous_contents()
+    {
+        var dir = Directory.CreateTempSubdirectory("monselect-tests");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "rules.yaml");
+            var ruleA = new Rule("A", MatchCriteria.Any,
+                new RulePlacement(new[] { "x" }, WindowState.Normal, null));
+            var ruleB = new Rule("B", MatchCriteria.Any,
+                new RulePlacement(new[] { "x" }, WindowState.Normal, null));
+
+            YamlStore.Save(path, new RuleSet(1, new Dictionary<string, MonitorAlias>(), new[] { ruleA }));
+            Assert.False(File.Exists(path + ".bak")); // nada que respaldar en el primer guardado.
+
+            YamlStore.Save(path, new RuleSet(1, new Dictionary<string, MonitorAlias>(), new[] { ruleA, ruleB }));
+            var backup = YamlStore.Load(path + ".bak");
+            Assert.Single(backup.Rules); // el backup es la versión de ANTES de este guardado.
+
+            YamlStore.Save(path, new RuleSet(1, new Dictionary<string, MonitorAlias>(), new[] { ruleB }));
+            backup = YamlStore.Load(path + ".bak");
+            Assert.Equal(2, backup.Rules.Count); // pisó el backup anterior con la versión previa a ESTE guardado.
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
     /// <summary>
     /// Compares every field of two <see cref="Rule"/> values. Not a plain
     /// Assert.Equal(expected, actual): the record-generated Equals compares

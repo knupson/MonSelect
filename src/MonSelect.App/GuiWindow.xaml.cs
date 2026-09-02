@@ -32,6 +32,28 @@ internal partial class GuiWindow : Window
         // esto el mapa se dibuja una vez con el tamaño de fallback y se queda
         // así hasta el próximo resize manual del usuario.
         Loaded += (_, _) => RenderMap();
+
+        // Sin esto, la grilla de Reglas sólo se entera de un cambio en
+        // rules.yaml cuando ALGUNA acción propia de esta ventana la refresca.
+        // Un guardado externo (otro proceso de MonSelect, el dueño editando el
+        // archivo a mano) llega acá vía el debounce del FileSystemWatcher de
+        // Bootstrap, y esa recarga corre en un hilo de threadpool — de ahí el
+        // chequeo de Dispatcher. El usuario mirando la pestaña Reglas tiene
+        // derecho a creer que lo que ve es lo que hay en el archivo.
+        _bootstrap.ConfigChanged += OnConfigChanged;
+        Closed += (_, _) => _bootstrap.ConfigChanged -= OnConfigChanged;
+    }
+
+    private void OnConfigChanged()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(OnConfigChanged);
+            return;
+        }
+
+        if (IsLoaded)
+            RefreshAll();
     }
 
     /// <summary>
@@ -192,9 +214,12 @@ internal partial class GuiWindow : Window
 
         try
         {
-            var current = YamlStore.Load(ConfigPaths.Rules);
-            var updated = current with { Rules = current.Rules.Append(rule).ToList() };
-            YamlStore.Save(ConfigPaths.Rules, updated);
+            // Update, no Load+Save: agrega la regla a lo que haya en el disco
+            // EN ESTE INSTANTE, bajo el mutex de YamlStore, en vez de a una
+            // instantánea leída al abrir el diálogo de captura — que pudo
+            // quedar vieja mientras el usuario acomodaba la ventana a mano.
+            YamlStore.Update(ConfigPaths.Rules,
+                current => current with { Rules = current.Rules.Append(rule).ToList() });
             _bootstrap.ReloadConfig();
             RefreshAll();
 
@@ -270,10 +295,22 @@ internal partial class GuiWindow : Window
 
         try
         {
-            var set = YamlStore.Load(ConfigPaths.Rules);
-            var rules = set.Rules.ToList();
-            var index = rules.FindIndex(r => r.Name == dialog.OriginalName);
-            if (index < 0)
+            var missing = false;
+            YamlStore.Update(ConfigPaths.Rules, current =>
+            {
+                var rules = current.Rules.ToList();
+                var index = rules.FindIndex(r => r.Name == dialog.OriginalName);
+                if (index < 0)
+                {
+                    missing = true;
+                    return current; // misma instancia: Update no toca el archivo.
+                }
+
+                rules[index] = edited;
+                return current with { Rules = rules };
+            });
+
+            if (missing)
             {
                 MessageBox.Show(this,
                     "La regla ya no está en rules.yaml (¿la borró o renombró otra ventana?); no se guardó el cambio.",
@@ -281,8 +318,8 @@ internal partial class GuiWindow : Window
                 return;
             }
 
-            rules[index] = edited;
-            SaveRules(set with { Rules = rules });
+            _bootstrap.ReloadConfig();
+            RefreshAll();
         }
         catch (Exception ex)
         {
@@ -300,15 +337,17 @@ internal partial class GuiWindow : Window
         if (RowOf(sender) is not { } row)
             return;
 
-        var set = YamlStore.Load(ConfigPaths.Rules);
-        var rules = set.Rules.ToList();
-        var index = rules.FindIndex(r => r.Name == row.Rule.Name);
-        var target = index + delta;
-        if (index < 0 || target < 0 || target >= rules.Count)
-            return;
+        UpdateRules(current =>
+        {
+            var rules = current.Rules.ToList();
+            var index = rules.FindIndex(r => r.Name == row.Rule.Name);
+            var target = index + delta;
+            if (index < 0 || target < 0 || target >= rules.Count)
+                return current;
 
-        (rules[index], rules[target]) = (rules[target], rules[index]);
-        SaveRules(set with { Rules = rules });
+            (rules[index], rules[target]) = (rules[target], rules[index]);
+            return current with { Rules = rules };
+        });
     }
 
     private void ToggleRuleEnabled_Click(object sender, RoutedEventArgs e)
@@ -316,14 +355,16 @@ internal partial class GuiWindow : Window
         if (RowOf(sender) is not { } row)
             return;
 
-        var set = YamlStore.Load(ConfigPaths.Rules);
-        var rules = set.Rules.ToList();
-        var index = rules.FindIndex(r => r.Name == row.Rule.Name);
-        if (index < 0)
-            return;
+        UpdateRules(current =>
+        {
+            var rules = current.Rules.ToList();
+            var index = rules.FindIndex(r => r.Name == row.Rule.Name);
+            if (index < 0)
+                return current;
 
-        rules[index] = rules[index] with { Enabled = !rules[index].Enabled };
-        SaveRules(set with { Rules = rules });
+            rules[index] = rules[index] with { Enabled = !rules[index].Enabled };
+            return current with { Rules = rules };
+        });
     }
 
     private void DeleteRule_Click(object sender, RoutedEventArgs e)
@@ -335,9 +376,7 @@ internal partial class GuiWindow : Window
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
-        var set = YamlStore.Load(ConfigPaths.Rules);
-        var rules = set.Rules.Where(r => r.Name != row.Rule.Name).ToList();
-        SaveRules(set with { Rules = rules });
+        UpdateRules(current => current with { Rules = current.Rules.Where(r => r.Name != row.Rule.Name).ToList() });
     }
 
     /// <summary>
@@ -366,11 +405,19 @@ internal partial class GuiWindow : Window
 
     private static RuleRow? RowOf(object sender) => (sender as FrameworkElement)?.DataContext as RuleRow;
 
-    private void SaveRules(RuleSet set)
+    /// <summary>
+    /// Punto único para habilitar/inhabilitar, borrar y reordenar. Igual que
+    /// <see cref="YamlStore.Update"/>, <paramref name="mutate"/> recibe SIEMPRE
+    /// el RuleSet recién leído del disco — nunca <c>_bootstrap.CurrentRuleSet</c>,
+    /// que puede estar atrasado respecto de un guardado que acaba de hacer otra
+    /// pestaña, otro proceso de MonSelect, o esta misma ventana un instante
+    /// antes.
+    /// </summary>
+    private void UpdateRules(Func<RuleSet, RuleSet> mutate)
     {
         try
         {
-            YamlStore.Save(ConfigPaths.Rules, set);
+            YamlStore.Update(ConfigPaths.Rules, mutate);
             _bootstrap.ReloadConfig();
             RefreshAll();
         }

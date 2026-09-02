@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using MonSelect.Core.Monitors;
 using MonSelect.Core.Win32;
@@ -67,7 +68,111 @@ public static class YamlStore
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        File.WriteAllText(path, Render(set), Utf8NoBom);
+        Backup(path);
+
+        // Atómico: escribe a un temporal y recién ahí reemplaza el archivo real
+        // (mismo patrón que StyleStore.Save). Sin esto, un crash o un power-loss
+        // a mitad del WriteAllText deja rules.yaml truncado — el archivo que el
+        // dueño mantiene a mano, no algo regenerable.
+        var tempPath = path + ".tmp";
+        try
+        {
+            File.WriteAllText(tempPath, Render(set), Utf8NoBom);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tempPath); }
+            catch { /* best effort, no tapar la excepción original */ }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Red de seguridad, no una funcionalidad: una copia de rules.yaml de justo
+    /// antes de este guardado, pisando la anterior. No cuesta nada y hubiera
+    /// dejado al dueño recuperar la regla de JDownloader que se perdió en
+    /// segundos en vez de tener que reescribirla a mano. Mejor esfuerzo: si el
+    /// backup falla (permisos, disco lleno) no bloquea el guardado real.
+    /// </summary>
+    private static void Backup(string path)
+    {
+        if (!File.Exists(path))
+            return;
+
+        try
+        {
+            File.Copy(path, path + ".bak", overwrite: true);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>
+    /// Lee el archivo, le aplica <paramref name="mutate"/> y lo guarda, todo
+    /// bajo un mutex nombrado por path completo — cierra la ventana entre "leer
+    /// lo que hay en disco" y "escribirlo de vuelta" en la que un segundo
+    /// escritor (otra ventana de Reglas, otro proceso de MonSelect, el
+    /// FileSystemWatcher recargando) puede colarse. Sin esto, cada llamador
+    /// tenía que reimplementar "load fresco justo antes de guardar" a mano, y
+    /// alcanzaba con que UNO no lo hiciera — o con que dos guardados
+    /// verdaderamente concurrentes se solaparan en esa ventana — para que el
+    /// último en escribir pisara en silencio lo que el otro acababa de agregar.
+    /// Así se perdió la regla de JDownloader del dueño.
+    /// <paramref name="mutate"/> recibe siempre el <see cref="RuleSet"/> que
+    /// hay en el disco en este instante, nunca una copia vieja en memoria. Si
+    /// devuelve la MISMA instancia que recibió (no hay cambio que hacer, p.ej.
+    /// la regla que se quería tocar ya no está), no se toca el archivo.
+    /// </summary>
+    public static RuleSet Update(string path, Func<RuleSet, RuleSet> mutate)
+    {
+        using var mutex = CreateFileMutex(path);
+        var acquired = false;
+        try
+        {
+            try
+            {
+                acquired = mutex.WaitOne(TimeSpan.FromSeconds(10));
+            }
+            catch (AbandonedMutexException)
+            {
+                // Otro proceso murió con el mutex tomado a mitad de un guardado.
+                // .NET igual nos da la propiedad acá; el archivo puede haber
+                // quedado a medio escribir por ese crash, pero Save es atómico
+                // (temp + rename), así que lo peor que hereda es un .tmp huérfano.
+                acquired = true;
+            }
+
+            if (!acquired)
+                throw new IOException(
+                    "rules.yaml está siendo modificado por otro proceso de MonSelect; probá de nuevo en un momento.");
+
+            var current = File.Exists(path) ? Load(path) : RuleSet.Empty;
+            var updated = mutate(current);
+            if (!ReferenceEquals(updated, current))
+                Save(path, updated);
+
+            return updated;
+        }
+        finally
+        {
+            if (acquired)
+                mutex.ReleaseMutex();
+        }
+    }
+
+    /// <summary>
+    /// Mutex por path, no por instancia: dos <see cref="Mutex"/> con el mismo
+    /// nombre en procesos distintos son el mismo objeto de kernel, que es
+    /// justo lo que hace falta para serializar Update entre la GUI y, por
+    /// ejemplo, un segundo MonSelect.App corriendo a la vez. "Local\" porque
+    /// rules.yaml es por usuario (%APPDATA%), no hace falta cruzar sesiones.
+    /// </summary>
+    private static Mutex CreateFileMutex(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var hash = Convert.ToHexString(SHA256.HashData(Utf8NoBom.GetBytes(fullPath.ToUpperInvariant())));
+        return new Mutex(initiallyOwned: false, name: $"Local\\MonSelect.Rules.{hash}");
     }
 
     /// <summary>
